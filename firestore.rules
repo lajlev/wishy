@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /wishlists/{wishlistId} {
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid;
+
+      // Authenticated users can read any wishlist (for queries by ownerId or shareToken)
+      allow read: if request.auth != null;
+
+      // Anyone can read a wishlist (shared view, no login required)
+      allow get: if true;
+      allow list: if true;
+
+      allow update, delete: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
+
+      match /items/{itemId} {
+        // Owner can CRUD items
+        allow read, write: if request.auth != null
+          && get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.ownerId == request.auth.uid;
+
+        // Anyone can read items (shared view, no login required)
+        allow read: if true;
+      }
+
+      match /reservations/{itemId} {
+        // Anyone authenticated (except owner) can read reservations
+        allow read: if request.auth != null
+          && request.auth.uid != get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.ownerId;
+
+        // Anyone authenticated (except owner) can write reservations
+        allow write: if request.auth != null
+          && request.auth.uid != get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.ownerId;
+      }
+    }
+  }
+}

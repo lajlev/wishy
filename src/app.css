@@ -1,0 +1,71 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-primary: #e8567f;
+	--color-primary-dark: #d63d6a;
+	--color-primary-light: #f9a8c4;
+	--color-secondary: #a78bfa;
+	--color-secondary-dark: #8b5cf6;
+	--color-accent: #fbbf24;
+	--color-accent-light: #fde68a;
+	--color-surface: #fdf8f4;
+	--color-surface-dark: #f5ede4;
+	--color-card: #ffffff;
+	--color-danger: #f87171;
+	--color-success: #34d399;
+	--color-text: #2e1065;
+	--color-text-soft: #6b5a8a;
+	--color-text-muted: #9b8ab8;
+	--font-sans: 'Nunito', system-ui, -apple-system, sans-serif;
+}
+
+body {
+	font-family: var(--font-sans);
+	background-color: var(--color-surface);
+	min-height: 100vh;
+	background-image:
+		radial-gradient(circle, var(--color-primary-light) 1px, transparent 1px),
+		radial-gradient(circle, var(--color-accent-light) 1px, transparent 1px);
+	background-size: 60px 60px, 90px 90px;
+	background-position: 0 0, 30px 45px;
+	background-attachment: fixed;
+	background-blend-mode: overlay;
+}
+
+@keyframes wiggle {
+	0%, 100% { transform: rotate(-1deg); }
+	50% { transform: rotate(1deg); }
+}
+
+@keyframes float {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-4px); }
+}
+
+@keyframes pop-in {
+	0% { transform: scale(0.95); opacity: 0; }
+	100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-pop-in {
+	animation: pop-in 0.3s ease-out;
+}
+
+.animate-float {
+	animation: float 3s ease-in-out infinite;
+}
+
+.animate-wiggle {
+	animation: wiggle 0.4s ease-in-out;
+}
+
+::selection {
+	background-color: var(--color-primary-light);
+	color: var(--color-text);
+}
+
+input:focus, textarea:focus, select:focus {
+	outline: none;
+	border-color: var(--color-primary) !important;
+	box-shadow: 0 0 0 3px rgba(232, 86, 127, 0.15) !important;
+}
