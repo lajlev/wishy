@@ -126,7 +126,7 @@
 				{#if $userProfile?.apiKey}
 					<div class="text-xs text-text-muted space-y-1 pt-1 border-t border-primary-light/20">
 						<p class="font-semibold">{$t('api.usage')}</p>
-						<code class="block bg-surface/80 rounded-lg px-3 py-2 font-mono whitespace-pre-wrap break-all">POST {window.location.origin.replace('wish.lajlev.dk', 'us-central1-wishy-famille.cloudfunctions.net')}/addItem
+						<code class="block bg-surface/80 rounded-lg px-3 py-2 font-mono whitespace-pre-wrap break-all">POST https://us-central1-wishy-famille.cloudfunctions.net/addItem
 {`{
   "apiKey": "${showApiKey ? $userProfile.apiKey : '<your-key>'}",
   "name": "Cool thing",
@@ -138,5 +138,65 @@
 				{/if}
 			</div>
 		</div>
+
+		<!-- Apple Shortcut tutorial -->
+		{#if $userProfile?.apiKey}
+			<div class="bg-card rounded-2xl border-2 border-primary-light/30 shadow-sm">
+				<div class="p-5 space-y-4">
+					<h2 class="text-sm font-bold text-text">📱 {$t('shortcut.title')}</h2>
+					<p class="text-xs text-text-muted">{$t('shortcut.intro')}</p>
+
+					<ol class="space-y-4">
+						<li class="flex gap-3">
+							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">1</span>
+							<div>
+								<p class="text-sm font-bold text-text">{$t('shortcut.step1.title')}</p>
+								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step1.desc')}</p>
+							</div>
+						</li>
+						<li class="flex gap-3">
+							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">2</span>
+							<div>
+								<p class="text-sm font-bold text-text">{$t('shortcut.step2.title')}</p>
+								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step2.desc')}</p>
+							</div>
+						</li>
+						<li class="flex gap-3">
+							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">3</span>
+							<div>
+								<p class="text-sm font-bold text-text">{$t('shortcut.step3.title')}</p>
+								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step3.desc')}</p>
+							</div>
+						</li>
+						<li class="flex gap-3">
+							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">4</span>
+							<div>
+								<p class="text-sm font-bold text-text">{$t('shortcut.step4.title')}</p>
+								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step4.desc')}</p>
+								<div class="mt-2 bg-surface/80 rounded-lg px-3 py-2 space-y-1">
+									<p class="text-xs font-mono text-text-soft">
+										<span class="text-text-muted">{$t('shortcut.step4.url')}:</span>
+										<span class="break-all">https://us-central1-wishy-famille.cloudfunctions.net/addItem</span>
+									</p>
+									<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.method')}</p>
+									<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.body')}</p>
+									<div class="border-t border-primary-light/20 pt-1 mt-1 space-y-0.5">
+										<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.field.apiKey')}</p>
+										<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.field.url')}</p>
+									</div>
+								</div>
+							</div>
+						</li>
+						<li class="flex gap-3">
+							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-success text-white text-xs font-bold flex items-center justify-center mt-0.5">✓</span>
+							<div>
+								<p class="text-sm font-bold text-text">{$t('shortcut.step5.title')}</p>
+								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step5.desc')}</p>
+							</div>
+						</li>
+					</ol>
+				</div>
+			</div>
+		{/if}
 	</div>
 </AuthGuard>
