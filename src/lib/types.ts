@@ -3,8 +3,19 @@ import type { Timestamp } from 'firebase/firestore';
 export interface UserProfile {
 	email: string;
 	displayName: string | null;
+	username?: string;
+	photoUrl?: string | null;
+	apiKey?: string;
 	locale: 'da' | 'en';
+	role?: 'admin' | 'user';
+	banned?: boolean;
 	createdAt: Timestamp;
+}
+
+export interface PublicProfile {
+	userId: string;
+	displayName?: string;
+	photoUrl?: string;
 }
 
 export interface Wishlist {

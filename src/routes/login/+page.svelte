@@ -5,11 +5,13 @@
 	import { isLoggedIn } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import Turnstile from '$lib/components/Turnstile.svelte';
 
 	let email = $state('');
 	let sent = $state(false);
 	let sending = $state(false);
 	let error = $state('');
+	let captchaToken = $state('');
 
 	$effect(() => {
 		if ($isLoggedIn) {
@@ -20,7 +22,7 @@
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		if (!email.trim()) return;
+		if (!email.trim() || !captchaToken) return;
 
 		sending = true;
 		error = '';
@@ -30,7 +32,7 @@
 
 		try {
 			const sendLogin = httpsCallable(functions, 'sendLoginEmail');
-			await sendLogin({ email, callbackUrl, locale: $locale });
+			await sendLogin({ email, callbackUrl, locale: $locale, captchaToken });
 			localStorage.setItem('wishy-login-email', email);
 			sent = true;
 		} catch (e) {
@@ -71,13 +73,15 @@
 				/>
 			</div>
 
+			<Turnstile onVerify={(token) => captchaToken = token} />
+
 			{#if error}
 				<p class="text-sm font-semibold text-danger">{error}</p>
 			{/if}
 
 			<button
 				type="submit"
-				disabled={sending || !email.trim()}
+				disabled={sending || !email.trim() || !captchaToken}
 				class="w-full font-bold bg-gradient-to-r from-primary to-primary-dark text-white px-4 py-3 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 disabled:opacity-50 transition-all active:scale-95"
 			>
 				{sending ? $t('login.sending') : `✨ ${$t('login.send')}`}

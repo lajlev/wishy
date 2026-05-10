@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { isSignInWithEmailLink, signInWithEmailLink } from 'firebase/auth';
-	import { auth } from '$lib/firebase';
+	import { doc, getDoc } from 'firebase/firestore';
+	import { auth, db } from '$lib/firebase';
 	import { t } from '$lib/i18n';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { signOut } from '$lib/stores/auth';
 
 	let error = $state('');
 	let emailInput = $state('');
@@ -27,8 +29,17 @@
 		}
 
 		try {
-			await signInWithEmailLink(auth, email, href);
+			const result = await signInWithEmailLink(auth, email, href);
 			localStorage.removeItem('wishy-login-email');
+
+			// Check if user is banned
+			const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+			if (userDoc.exists() && userDoc.data().banned) {
+				await signOut();
+				error = $t('login.banned');
+				return;
+			}
+
 			const redirect = page.url.searchParams.get('redirect') || '/';
 			goto(redirect);
 		} catch {

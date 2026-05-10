@@ -1,7 +1,7 @@
 <script lang="ts">
 	import {
 		collection, query, where, getDocs, onSnapshot, orderBy,
-		doc, setDoc, deleteDoc, serverTimestamp
+		doc, getDoc, setDoc, deleteDoc, serverTimestamp
 	} from 'firebase/firestore';
 	import { db } from '$lib/firebase';
 	import { user, isLoggedIn } from '$lib/stores/auth';
@@ -17,15 +17,27 @@
 	let loading = $state(true);
 	let isOwner = $state(false);
 
-	const token = $derived(page.params.token);
+	const username = $derived(page.params.username);
 
 	$effect(() => {
-		if (!token) return;
+		if (!username) return;
 
 		let unsubs: (() => void)[] = [];
 
 		(async () => {
-			const q = query(collection(db, 'wishlists'), where('shareToken', '==', token));
+			const usernameDoc = await getDoc(doc(db, 'usernames', username));
+			if (!usernameDoc.exists()) {
+				loading = false;
+				return;
+			}
+
+			const userId = usernameDoc.data().userId;
+
+			const q = query(
+				collection(db, 'wishlists'),
+				where('ownerId', '==', userId),
+				orderBy('createdAt', 'desc')
+			);
 			const snap = await getDocs(q);
 
 			if (snap.empty) {
@@ -36,7 +48,7 @@
 			const wDoc = snap.docs[0];
 			const data = wDoc.data();
 			wishlist = { id: wDoc.id, ...data } as Wishlist;
-			ownerName = (data as any).ownerName || '';
+			ownerName = (data as any).ownerName || username;
 
 			const currentUser = $user;
 			isOwner = !!(currentUser && wishlist.ownerId === currentUser.uid);
@@ -106,7 +118,6 @@
 			<h1 class="text-2xl font-extrabold text-text">
 				🎁 {$t('shared.title', { name: ownerName })}
 			</h1>
-			<p class="text-lg text-text-soft font-semibold mt-1">{wishlist.title}</p>
 			{#if wishlist.description}
 				<p class="text-text-muted mt-1">{wishlist.description}</p>
 			{/if}
@@ -121,7 +132,7 @@
 		{#if !$isLoggedIn}
 			<div class="bg-primary-light/20 border-2 border-primary-light/40 rounded-2xl p-4 text-center">
 				<a
-					href="/login?redirect={encodeURIComponent(`/shared/${token}`)}"
+					href="/login?redirect={encodeURIComponent(`/lists/${username}`)}"
 					class="text-sm font-bold text-primary hover:text-primary-dark transition-colors"
 				>
 					✨ {$t('shared.loginToReserve')}

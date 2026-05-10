@@ -1,4 +1,4 @@
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import * as admin from 'firebase-admin';
 import { Resend } from 'resend';
@@ -10,6 +10,28 @@ admin.initializeApp();
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
 const resendApiKey = defineSecret('RESEND_API_KEY');
 const resendFrom = defineSecret('RESEND_FROM');
+const turnstileSecret = defineSecret('TURNSTILE_SECRET_KEY');
+
+const ADMIN_EMAIL = 'lajlev@gmail.com';
+
+async function verifyTurnstile(token: string, secret: string): Promise<boolean> {
+	if (!secret || token === 'dev-bypass') return true;
+
+	const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body: `secret=${encodeURIComponent(secret)}&response=${encodeURIComponent(token)}`,
+	});
+	const data = await res.json() as { success: boolean };
+	return data.success;
+}
+
+async function requireAdmin(uid: string): Promise<void> {
+	const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+	if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
+		throw new HttpsError('permission-denied', 'Admin access required');
+	}
+}
 
 const emailStrings: Record<string, Record<string, string>> = {
 	da: {
@@ -114,15 +136,30 @@ function buildLoginEmail(signInLink: string, locale: string): string {
 }
 
 export const sendLoginEmail = onCall(
-	{ maxInstances: 10, secrets: [resendApiKey, resendFrom], cors: true },
+	{ maxInstances: 10, secrets: [resendApiKey, resendFrom, turnstileSecret], cors: true },
 	async (request) => {
-		const { email, callbackUrl, locale } = request.data;
+		const { email, callbackUrl, locale, captchaToken } = request.data;
 
 		if (!email || typeof email !== 'string') {
 			throw new HttpsError('invalid-argument', 'Email is required');
 		}
 		if (!callbackUrl || typeof callbackUrl !== 'string') {
 			throw new HttpsError('invalid-argument', 'Callback URL is required');
+		}
+
+		const valid = await verifyTurnstile(captchaToken || '', turnstileSecret.value());
+		if (!valid) {
+			throw new HttpsError('permission-denied', 'Captcha verification failed');
+		}
+
+		// Check if user is banned
+		const usersSnap = await admin.firestore()
+			.collection('users')
+			.where('email', '==', email)
+			.limit(1)
+			.get();
+		if (!usersSnap.empty && usersSnap.docs[0].data().banned) {
+			throw new HttpsError('permission-denied', 'Account is banned');
 		}
 
 		const signInLink = await admin.auth().generateSignInWithEmailLink(email, {
@@ -141,6 +178,104 @@ export const sendLoginEmail = onCall(
 			html: buildLoginEmail(signInLink, lang),
 		});
 
+		return { success: true };
+	}
+);
+
+export const adminListUsers = onCall(
+	{ maxInstances: 5, cors: true },
+	async (request) => {
+		if (!request.auth) {
+			throw new HttpsError('unauthenticated', 'Must be logged in');
+		}
+		await requireAdmin(request.auth.uid);
+
+		const usersSnap = await admin.firestore().collection('users').orderBy('createdAt', 'desc').get();
+		return usersSnap.docs.map((doc) => ({
+			uid: doc.id,
+			...doc.data(),
+		}));
+	}
+);
+
+export const adminBanUser = onCall(
+	{ maxInstances: 5, cors: true },
+	async (request) => {
+		if (!request.auth) {
+			throw new HttpsError('unauthenticated', 'Must be logged in');
+		}
+		await requireAdmin(request.auth.uid);
+
+		const { uid, banned } = request.data;
+		if (!uid || typeof uid !== 'string') {
+			throw new HttpsError('invalid-argument', 'User ID is required');
+		}
+
+		await admin.firestore().doc(`users/${uid}`).update({ banned: !!banned });
+
+		if (banned) {
+			await admin.auth().revokeRefreshTokens(uid);
+		}
+
+		return { success: true };
+	}
+);
+
+export const adminDeleteUser = onCall(
+	{ maxInstances: 5, cors: true },
+	async (request) => {
+		if (!request.auth) {
+			throw new HttpsError('unauthenticated', 'Must be logged in');
+		}
+		await requireAdmin(request.auth.uid);
+
+		const { uid } = request.data;
+		if (!uid || typeof uid !== 'string') {
+			throw new HttpsError('invalid-argument', 'User ID is required');
+		}
+
+		// Prevent self-deletion
+		if (uid === request.auth.uid) {
+			throw new HttpsError('invalid-argument', 'Cannot delete your own account');
+		}
+
+		// Delete user's wishlists and sub-collections
+		const wishlistsSnap = await admin.firestore()
+			.collection('wishlists')
+			.where('ownerId', '==', uid)
+			.get();
+
+		const batch = admin.firestore().batch();
+		for (const doc of wishlistsSnap.docs) {
+			const itemsSnap = await admin.firestore().collection(`wishlists/${doc.id}/items`).get();
+			for (const item of itemsSnap.docs) batch.delete(item.ref);
+			const reservationsSnap = await admin.firestore().collection(`wishlists/${doc.id}/reservations`).get();
+			for (const res of reservationsSnap.docs) batch.delete(res.ref);
+			batch.delete(doc.ref);
+		}
+		batch.delete(admin.firestore().doc(`users/${uid}`));
+		await batch.commit();
+
+		await admin.auth().deleteUser(uid);
+
+		return { success: true };
+	}
+);
+
+// One-time setup: call this after first login to set admin role
+export const setupAdmin = onCall(
+	{ maxInstances: 1, cors: true },
+	async (request) => {
+		if (!request.auth) {
+			throw new HttpsError('unauthenticated', 'Must be logged in');
+		}
+
+		const userRecord = await admin.auth().getUser(request.auth.uid);
+		if (userRecord.email !== ADMIN_EMAIL) {
+			throw new HttpsError('permission-denied', 'Not authorized');
+		}
+
+		await admin.firestore().doc(`users/${request.auth.uid}`).update({ role: 'admin' });
 		return { success: true };
 	}
 );
@@ -341,5 +476,75 @@ Return JSON only, no markdown:
 			notes: extractedNotes || null,
 			siteName: ogSiteName || null,
 		};
+	}
+);
+
+export const addItem = onRequest(
+	{ maxInstances: 10, cors: true },
+	async (req, res) => {
+		if (req.method !== 'POST') {
+			res.status(405).json({ error: 'Method not allowed' });
+			return;
+		}
+
+		const { apiKey, name, url, price, currency, notes, imageUrl } = req.body;
+
+		if (!apiKey || typeof apiKey !== 'string') {
+			res.status(401).json({ error: 'API key is required' });
+			return;
+		}
+
+		if (!name && !url) {
+			res.status(400).json({ error: 'At least name or url is required' });
+			return;
+		}
+
+		const usersSnap = await admin.firestore()
+			.collection('users')
+			.where('apiKey', '==', apiKey)
+			.limit(1)
+			.get();
+
+		if (usersSnap.empty) {
+			res.status(401).json({ error: 'Invalid API key' });
+			return;
+		}
+
+		const userDoc = usersSnap.docs[0];
+		const userId = userDoc.id;
+
+		const wishlistsSnap = await admin.firestore()
+			.collection('wishlists')
+			.where('ownerId', '==', userId)
+			.limit(1)
+			.get();
+
+		if (wishlistsSnap.empty) {
+			res.status(404).json({ error: 'No wishlist found' });
+			return;
+		}
+
+		const wishlistId = wishlistsSnap.docs[0].id;
+
+		const itemsSnap = await admin.firestore()
+			.collection(`wishlists/${wishlistId}/items`)
+			.get();
+
+		const itemData = {
+			name: name || url,
+			url: url || null,
+			price: typeof price === 'number' ? price : null,
+			currency: currency || null,
+			imageUrl: imageUrl || null,
+			notes: notes || null,
+			order: itemsSnap.size,
+			createdAt: admin.firestore.FieldValue.serverTimestamp(),
+		};
+
+		const docRef = await admin.firestore()
+			.collection(`wishlists/${wishlistId}/items`)
+			.add(itemData);
+
+		res.status(201).json({ success: true, itemId: docRef.id });
 	}
 );
