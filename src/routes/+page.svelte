@@ -26,26 +26,6 @@
 		<p class="text-text-soft mt-1">{$t('home.subtitle')}</p>
 	</div>
 
-	{#if $isLoggedIn && $userProfile?.username}
-		<div class="flex justify-center">
-			<a
-				href="/my-list"
-				class="font-bold bg-gradient-to-r from-primary to-primary-dark text-white px-6 py-2.5 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
-			>
-				🎁 {$t('nav.myList')}
-			</a>
-		</div>
-	{:else if !$isLoggedIn}
-		<div class="flex justify-center">
-			<a
-				href="/login"
-				class="font-bold bg-gradient-to-r from-primary to-secondary text-white px-6 py-2.5 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
-			>
-				✨ {$t('home.createYours')}
-			</a>
-		</div>
-	{/if}
-
 	{#if loading}
 		<div class="flex flex-col items-center py-12 gap-3">
 			<span class="text-4xl animate-float">🎁</span>

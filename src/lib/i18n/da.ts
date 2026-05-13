@@ -3,6 +3,7 @@ export default {
 	'app.tagline': 'Din families ønskeliste',
 
 	'nav.myList': 'Min liste',
+	'nav.about': 'Om Wishy',
 	'nav.logout': 'Log ud',
 
 	'home.title': 'Ønskelister',
@@ -108,6 +109,22 @@ export default {
 	'shared.notFound': 'Ønskeliste ikke fundet',
 	'shared.ownList': 'Dette er din egen liste. Du kan ikke se reservationer.',
 	'shared.loginToReserve': 'Log ind for at reservere ønsker',
+
+	'about.title': 'Hvorfor Wishy?',
+	'about.intro': 'Wishy er en simpel, åben ønskeliste uden skjulte interesser. Her er hvorfor det betyder noget.',
+	'about.affiliate.title': 'Affiliate og skjult reklame',
+	'about.affiliate.body': 'Ønskeskyen ændrer brugeres links til butikker, der betaler provision, så platformen tjener på ønskerne. Forbrugerombudsmanden undersøger, om gaveforslag og influencer-lister i creator-universet er skjult reklame.',
+	'about.pressure.title': 'Forbrugspres på børn',
+	'about.pressure.body': 'Appen foreslår produkter ud fra køn, alder og trends og præsenterer dem som populære ønsker. Hver fjerde barn har følt sig presset til at købe noget for at blive accepteret i klassen — blandt piger næsten hver tredje (Børns Vilkår 2025).',
+	'about.influencer.title': 'Børn som hinandens influencere',
+	'about.influencer.body': 'Børn deler ønskelister med brands, makeup og specifikke webshops og følger kendte influencere i creator-universet. Grænsen mellem personligt ønske og kommerciel påvirkning bliver utydelig.',
+	'about.data.title': 'Data og aldersgrænse',
+	'about.data.body': 'Platformen samler detaljeret data om ønsker, profiler og adfærd. Der har været bekymring for håndtering af data om børn under 15. Aldersgrænsen er hævet til 15 år, og Kids Accounts begrænser adgang til creator-univers, trendinglister og venners ønskelister.',
+	'about.visibility.title': 'Synlighed, mobning og sabotage',
+	'about.visibility.body': 'Ønskelister er som udgangspunkt åbent synlige, hvis brugeren ikke aktivt sætter dem til private. Fritidsklubber i Roskilde advarer om, at børn reserverer hinandens gaver eller driller via listerne, så nogle skjuler deres reelle ønsker.',
+	'about.wishy.title': 'Wishy er anderledes',
+	'about.wishy.body': 'Wishy har ingen affiliate-links, ingen reklamer, ingen algoritmer der foreslår produkter, og ingen social dynamik der presser børn. Det er bare en ønskeliste — intet mere.',
+	'about.cta': 'Opret din ønskeliste',
 
 	'common.loading': 'Indlæser...',
 	'common.error': 'Noget gik galt',

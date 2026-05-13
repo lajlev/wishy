@@ -3,6 +3,7 @@ export default {
 	'app.tagline': 'Your family wishlist',
 
 	'nav.myList': 'My list',
+	'nav.about': 'About Wishy',
 	'nav.logout': 'Log out',
 
 	'home.title': 'Wishlists',
@@ -108,6 +109,22 @@ export default {
 	'shared.notFound': 'Wishlist not found',
 	'shared.ownList': "This is your own list. You can't see reservations.",
 	'shared.loginToReserve': 'Sign in to reserve wishes',
+
+	'about.title': 'Why Wishy?',
+	'about.intro': 'Wishy is a simple, open wishlist with no hidden interests. Here is why that matters.',
+	'about.affiliate.title': 'Affiliate links and hidden advertising',
+	'about.affiliate.body': 'Ønskeskyen replaces user links with affiliate links to stores that pay commission, so the platform profits from your wishes. The Danish Consumer Ombudsman is investigating whether gift suggestions and influencer lists in the creator universe constitute hidden advertising.',
+	'about.pressure.title': 'Consumer pressure on children',
+	'about.pressure.body': 'The app suggests products based on gender, age, and trends and presents them as popular wishes. One in four children has felt pressured to buy something to be accepted in class — among girls, nearly one in three (Børns Vilkår 2025).',
+	'about.influencer.title': 'Children as each other\'s influencers',
+	'about.influencer.body': 'Children share wishlists with brands, makeup, and specific webshops and follow well-known influencers in the creator universe. The line between a personal wish and commercial influence becomes blurred.',
+	'about.data.title': 'Data and age limits',
+	'about.data.body': 'The platform collects detailed data about wishes, profiles, and behavior. There has been concern about the handling of data for children under 15. The age limit has been raised to 15, and Kids Accounts restrict access to the creator universe, trending lists, and friends\' wishlists.',
+	'about.visibility.title': 'Visibility, bullying, and sabotage',
+	'about.visibility.body': 'Wishlists are publicly visible by default unless the user actively sets them to private. Youth clubs in Roskilde warn that children reserve each other\'s gifts or tease through the lists, causing some to hide their real wishes.',
+	'about.wishy.title': 'Wishy is different',
+	'about.wishy.body': 'Wishy has no affiliate links, no ads, no algorithms suggesting products, and no social dynamics pressuring children. It is just a wishlist — nothing more.',
+	'about.cta': 'Create your wishlist',
 
 	'common.loading': 'Loading...',
 	'common.error': 'Something went wrong',
