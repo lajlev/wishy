@@ -36,6 +36,7 @@ export interface WishItem {
 	currency: string | null;
 	imageUrl: string | null;
 	notes: string | null;
+	favorite: boolean;
 	order: number;
 	createdAt: Timestamp;
 }

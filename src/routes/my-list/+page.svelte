@@ -20,6 +20,15 @@
 	let editingItem = $state<WishItemType | null>(null);
 	let copied = $state(false);
 	let addFormKey = $state(0);
+	let toast = $state('');
+
+	const sortedItems = $derived(
+		[...items].sort((a, b) => {
+			if (a.favorite && !b.favorite) return -1;
+			if (!a.favorite && b.favorite) return 1;
+			return a.order - b.order;
+		})
+	);
 
 	let usernameInput = $state('');
 	let usernameError = $state('');
@@ -90,10 +99,28 @@
 			url: data.url || null,
 			imageUrl: data.imageUrl || null,
 			notes: data.notes || null,
+			favorite: false,
 			order: items.length,
 			createdAt: serverTimestamp()
 		});
 		addFormKey++;
+	}
+
+	let toastTimer: ReturnType<typeof setTimeout>;
+
+	function showToast(msg: string) {
+		clearTimeout(toastTimer);
+		toast = msg;
+		toastTimer = setTimeout(() => (toast = ''), 2000);
+	}
+
+	async function toggleFavorite(item: WishItemType) {
+		if (!wishlist) return;
+		const newVal = !item.favorite;
+		await updateDoc(doc(db, 'wishlists', wishlist.id, 'items', item.id), {
+			favorite: newVal
+		});
+		showToast(newVal ? `⭐ ${$t('item.favoriteAdded')}` : $t('item.favoriteRemoved'));
 	}
 
 	async function updateItem(data: {
@@ -240,7 +267,7 @@
 			{/if}
 
 			<div class="space-y-3">
-				{#each items as item (item.id)}
+				{#each sortedItems as item (item.id)}
 					{#if editingItem?.id === item.id}
 						<WishForm
 							initialName={item.name}
@@ -258,6 +285,7 @@
 							isOwner={true}
 							onedit={() => (editingItem = item)}
 							ondelete={() => deleteItem(item.id)}
+							ontogglefavorite={() => toggleFavorite(item)}
 						/>
 					{/if}
 				{/each}
@@ -266,6 +294,12 @@
 			{#key addFormKey}
 				<WishForm onsave={addItem} />
 			{/key}
+		</div>
+	{/if}
+
+	{#if toast}
+		<div class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-text text-white text-sm font-bold px-5 py-2.5 rounded-full shadow-lg animate-pop-in z-50">
+			{toast}
 		</div>
 	{/if}
 </AuthGuard>

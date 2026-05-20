@@ -5,6 +5,7 @@
 	import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 
 	let uploadingPhoto = $state(false);
+	let showAdvanced = $state(false);
 	let showApiKey = $state(false);
 	let generatingKey = $state(false);
 	let apiKeyCopied = $state(false);
@@ -84,49 +85,59 @@
 			<LanguageSwitcher />
 		</div>
 
-		<!-- API key section -->
-		<div class="bg-card rounded-2xl border-2 border-primary-light/30 shadow-sm">
-			<div class="p-5 space-y-3">
-				<h2 class="text-sm font-bold text-text">🔑 {$t('api.title')}</h2>
-				<p class="text-xs text-text-muted">{$t('api.description')}</p>
-				{#if $userProfile?.apiKey}
-					<div class="flex items-center gap-2">
-						<code class="flex-1 text-xs bg-surface/80 rounded-lg px-3 py-2 font-mono text-text-soft truncate">
-							{showApiKey ? $userProfile.apiKey : '••••••••••••••••••••••••••••••••'}
-						</code>
+		<!-- Advanced settings toggle -->
+		<button
+			onclick={() => (showAdvanced = !showAdvanced)}
+			class="flex items-center gap-2 text-sm font-semibold text-text-muted hover:text-text transition-colors"
+		>
+			<span class="transition-transform duration-200 {showAdvanced ? 'rotate-90' : ''}">&rsaquo;</span>
+			{$t('settings.advanced')}
+		</button>
+
+		{#if showAdvanced}
+			<!-- API key section -->
+			<div class="bg-card rounded-2xl border-2 border-primary-light/30 shadow-sm animate-pop-in">
+				<div class="p-5 space-y-3">
+					<h2 class="text-sm font-bold text-text">🔑 {$t('api.title')}</h2>
+					<p class="text-xs text-text-muted">{$t('api.description')}</p>
+					{#if $userProfile?.apiKey}
+						<div class="flex items-center gap-2">
+							<code class="flex-1 text-xs bg-surface/80 rounded-lg px-3 py-2 font-mono text-text-soft truncate">
+								{showApiKey ? $userProfile.apiKey : '••••••••••••••••••••••••••••••••'}
+							</code>
+							<button
+								onclick={() => (showApiKey = !showApiKey)}
+								class="text-xs text-text-muted hover:text-text px-2 py-1"
+							>
+								{showApiKey ? $t('api.hide') : $t('api.show')}
+							</button>
+							<button
+								onclick={copyApiKey}
+								class="text-xs font-bold px-3 py-1.5 rounded-full border border-secondary/30 text-secondary hover:border-secondary hover:bg-secondary/10 transition-all"
+							>
+								{apiKeyCopied ? '✅' : $t('api.copy')}
+							</button>
+						</div>
 						<button
-							onclick={() => (showApiKey = !showApiKey)}
-							class="text-xs text-text-muted hover:text-text px-2 py-1"
+							onclick={handleGenerateApiKey}
+							disabled={generatingKey}
+							class="text-xs text-text-muted hover:text-danger transition-colors"
 						>
-							{showApiKey ? $t('api.hide') : $t('api.show')}
+							{$t('api.regenerate')}
 						</button>
+					{:else}
 						<button
-							onclick={copyApiKey}
-							class="text-xs font-bold px-3 py-1.5 rounded-full border border-secondary/30 text-secondary hover:border-secondary hover:bg-secondary/10 transition-all"
+							onclick={handleGenerateApiKey}
+							disabled={generatingKey}
+							class="text-sm font-bold px-4 py-2 rounded-full border-2 border-primary-light/30 text-primary hover:border-primary hover:bg-primary-light/20 transition-all active:scale-95"
 						>
-							{apiKeyCopied ? '✅' : $t('api.copy')}
+							{generatingKey ? '...' : $t('api.generate')}
 						</button>
-					</div>
-					<button
-						onclick={handleGenerateApiKey}
-						disabled={generatingKey}
-						class="text-xs text-text-muted hover:text-danger transition-colors"
-					>
-						{$t('api.regenerate')}
-					</button>
-				{:else}
-					<button
-						onclick={handleGenerateApiKey}
-						disabled={generatingKey}
-						class="text-sm font-bold px-4 py-2 rounded-full border-2 border-primary-light/30 text-primary hover:border-primary hover:bg-primary-light/20 transition-all active:scale-95"
-					>
-						{generatingKey ? '...' : $t('api.generate')}
-					</button>
-				{/if}
-				{#if $userProfile?.apiKey}
-					<div class="text-xs text-text-muted space-y-1 pt-1 border-t border-primary-light/20">
-						<p class="font-semibold">{$t('api.usage')}</p>
-						<code class="block bg-surface/80 rounded-lg px-3 py-2 font-mono whitespace-pre-wrap break-all">POST https://us-central1-wishy-famille.cloudfunctions.net/addItem
+					{/if}
+					{#if $userProfile?.apiKey}
+						<div class="text-xs text-text-muted space-y-1 pt-1 border-t border-primary-light/20">
+							<p class="font-semibold">{$t('api.usage')}</p>
+							<code class="block bg-surface/80 rounded-lg px-3 py-2 font-mono whitespace-pre-wrap break-all">POST https://us-central1-wishy-famille.cloudfunctions.net/addItem
 {`{
   "apiKey": "${showApiKey ? $userProfile.apiKey : '<your-key>'}",
   "name": "Cool thing",
@@ -134,69 +145,70 @@
   "price": 299,
   "currency": "DKK"
 }`}</code>
-					</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Apple Shortcut tutorial -->
-		{#if $userProfile?.apiKey}
-			<div class="bg-card rounded-2xl border-2 border-primary-light/30 shadow-sm">
-				<div class="p-5 space-y-4">
-					<h2 class="text-sm font-bold text-text">📱 {$t('shortcut.title')}</h2>
-					<p class="text-xs text-text-muted">{$t('shortcut.intro')}</p>
-
-					<ol class="space-y-4">
-						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">1</span>
-							<div>
-								<p class="text-sm font-bold text-text">{$t('shortcut.step1.title')}</p>
-								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step1.desc')}</p>
-							</div>
-						</li>
-						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">2</span>
-							<div>
-								<p class="text-sm font-bold text-text">{$t('shortcut.step2.title')}</p>
-								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step2.desc')}</p>
-							</div>
-						</li>
-						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">3</span>
-							<div>
-								<p class="text-sm font-bold text-text">{$t('shortcut.step3.title')}</p>
-								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step3.desc')}</p>
-							</div>
-						</li>
-						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">4</span>
-							<div>
-								<p class="text-sm font-bold text-text">{$t('shortcut.step4.title')}</p>
-								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step4.desc')}</p>
-								<div class="mt-2 bg-surface/80 rounded-lg px-3 py-2 space-y-1">
-									<p class="text-xs font-mono text-text-soft">
-										<span class="text-text-muted">{$t('shortcut.step4.url')}:</span>
-										<span class="break-all">https://us-central1-wishy-famille.cloudfunctions.net/addItem</span>
-									</p>
-									<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.method')}</p>
-									<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.body')}</p>
-									<div class="border-t border-primary-light/20 pt-1 mt-1 space-y-0.5">
-										<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.field.apiKey')}</p>
-										<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.field.url')}</p>
-									</div>
-								</div>
-							</div>
-						</li>
-						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-success text-white text-xs font-bold flex items-center justify-center mt-0.5">✓</span>
-							<div>
-								<p class="text-sm font-bold text-text">{$t('shortcut.step5.title')}</p>
-								<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step5.desc')}</p>
-							</div>
-						</li>
-					</ol>
+						</div>
+					{/if}
 				</div>
 			</div>
+
+			<!-- Apple Shortcut tutorial -->
+			{#if $userProfile?.apiKey}
+				<div class="bg-card rounded-2xl border-2 border-primary-light/30 shadow-sm animate-pop-in">
+					<div class="p-5 space-y-4">
+						<h2 class="text-sm font-bold text-text">📱 {$t('shortcut.title')}</h2>
+						<p class="text-xs text-text-muted">{$t('shortcut.intro')}</p>
+
+						<ol class="space-y-4">
+							<li class="flex gap-3">
+								<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">1</span>
+								<div>
+									<p class="text-sm font-bold text-text">{$t('shortcut.step1.title')}</p>
+									<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step1.desc')}</p>
+								</div>
+							</li>
+							<li class="flex gap-3">
+								<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">2</span>
+								<div>
+									<p class="text-sm font-bold text-text">{$t('shortcut.step2.title')}</p>
+									<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step2.desc')}</p>
+								</div>
+							</li>
+							<li class="flex gap-3">
+								<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">3</span>
+								<div>
+									<p class="text-sm font-bold text-text">{$t('shortcut.step3.title')}</p>
+									<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step3.desc')}</p>
+								</div>
+							</li>
+							<li class="flex gap-3">
+								<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center mt-0.5">4</span>
+								<div>
+									<p class="text-sm font-bold text-text">{$t('shortcut.step4.title')}</p>
+									<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step4.desc')}</p>
+									<div class="mt-2 bg-surface/80 rounded-lg px-3 py-2 space-y-1">
+										<p class="text-xs font-mono text-text-soft">
+											<span class="text-text-muted">{$t('shortcut.step4.url')}:</span>
+											<span class="break-all">https://us-central1-wishy-famille.cloudfunctions.net/addItem</span>
+										</p>
+										<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.method')}</p>
+										<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.body')}</p>
+										<div class="border-t border-primary-light/20 pt-1 mt-1 space-y-0.5">
+											<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.field.apiKey')}</p>
+											<p class="text-xs font-mono text-text-soft">{$t('shortcut.step4.field.url')}</p>
+										</div>
+									</div>
+								</div>
+							</li>
+							<li class="flex gap-3">
+								<span class="flex-shrink-0 w-6 h-6 rounded-full bg-success text-white text-xs font-bold flex items-center justify-center mt-0.5">✓</span>
+								<div>
+									<p class="text-sm font-bold text-text">{$t('shortcut.step5.title')}</p>
+									<p class="text-xs text-text-muted mt-0.5">{$t('shortcut.step5.desc')}</p>
+								</div>
+							</li>
+						</ol>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </AuthGuard>

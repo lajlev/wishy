@@ -40,6 +40,8 @@ export default {
 	'settings.title': 'Settings',
 	'settings.language': 'Language',
 
+	'settings.advanced': 'Advanced settings',
+
 	'api.title': 'API key (Apple Shortcuts)',
 	'api.description': 'Use your API key to add wishes from Apple Shortcuts or other apps.',
 	'api.generate': 'Generate API key',
@@ -99,6 +101,9 @@ export default {
 	'item.pickImage': 'Pick an image',
 	'item.addManually': 'or add manually',
 	'item.edit': 'Edit',
+	'item.favorite': 'FAVORITE',
+	'item.favoriteAdded': 'Marked as favorite!',
+	'item.favoriteRemoved': 'Removed from favorites',
 
 	'shared.title': 'Wishlist from {name}',
 	'shared.reserve': 'Reserve',

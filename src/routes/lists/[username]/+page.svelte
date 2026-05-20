@@ -17,6 +17,14 @@
 	let loading = $state(true);
 	let isOwner = $state(false);
 
+	const sortedItems = $derived(
+		[...items].sort((a, b) => {
+			if (a.favorite && !b.favorite) return -1;
+			if (!a.favorite && b.favorite) return 1;
+			return a.order - b.order;
+		})
+	);
+
 	const username = $derived(page.params.username);
 
 	$effect(() => {
@@ -141,7 +149,7 @@
 		{/if}
 
 		<div class="space-y-3">
-			{#each items as item (item.id)}
+			{#each sortedItems as item (item.id)}
 				<WishItem
 					{item}
 					reservation={reservations[item.id] || null}

@@ -537,6 +537,7 @@ export const addItem = onRequest(
 			currency: currency || null,
 			imageUrl: imageUrl || null,
 			notes: notes || null,
+			favorite: false,
 			order: itemsSnap.size,
 			createdAt: admin.firestore.FieldValue.serverTimestamp(),
 		};

@@ -11,7 +11,8 @@
 		ondelete,
 		onedit,
 		onreserve,
-		onunreserve
+		onunreserve,
+		ontogglefavorite
 	}: {
 		item: WishItem;
 		reservation?: Reservation | null;
@@ -22,6 +23,7 @@
 		onedit?: () => void;
 		onreserve?: () => void;
 		onunreserve?: () => void;
+		ontogglefavorite?: () => void;
 	} = $props();
 
 	const isReservedByMe = $derived(reservation?.reservedBy === currentUserId);
@@ -29,7 +31,7 @@
 </script>
 
 <div
-	class="bg-card rounded-2xl border-2 p-4 flex gap-4 transition-all duration-200 hover:shadow-md {isReservedByOther ? 'opacity-50 border-text-muted/20' : 'border-primary-light/30 hover:border-primary/30 hover:shadow-primary/5'}"
+	class="bg-card rounded-2xl border-2 p-4 flex gap-4 transition-all duration-200 hover:shadow-md {isReservedByOther ? 'opacity-50 border-text-muted/20' : item.favorite && !isOwner ? 'border-accent/40 hover:border-accent/60 hover:shadow-accent/10 bg-accent-light/10' : 'border-primary-light/30 hover:border-primary/30 hover:shadow-primary/5'}"
 >
 	{#if item.imageUrl}
 		<img
@@ -42,13 +44,29 @@
 	<div class="flex-1 min-w-0">
 		<div class="flex items-start justify-between gap-2">
 			<div>
-				<h4 class="font-bold text-text">{item.name}</h4>
+				<div class="flex items-center gap-1.5">
+					<h4 class="font-bold text-text">{item.name}</h4>
+					{#if item.favorite && !isOwner}
+						<span class="text-[10px] font-bold tracking-wider text-accent-dark bg-accent-light/50 px-1.5 py-0.5 rounded-full leading-none">{$t('item.favorite')}</span>
+					{/if}
+				</div>
 				{#if item.price}
 					<p class="text-sm text-primary font-bold mt-0.5">
 						{item.price} {item.currency || 'DKK'}
 					</p>
 				{/if}
 			</div>
+			{#if isOwner}
+				<button
+					onclick={ontogglefavorite}
+					class="flex-shrink-0 text-lg transition-all active:scale-90 hover:scale-110 {item.favorite ? 'text-accent drop-shadow-sm' : 'text-text-muted/40 hover:text-accent/60'}"
+					title={item.favorite ? 'Remove favorite' : 'Mark as favorite'}
+				>
+					{item.favorite ? '★' : '☆'}
+				</button>
+			{:else if item.favorite}
+				<span class="flex-shrink-0 text-lg text-accent drop-shadow-sm">★</span>
+			{/if}
 		</div>
 
 		{#if item.notes}

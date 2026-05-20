@@ -40,6 +40,8 @@ export default {
 	'settings.title': 'Indstillinger',
 	'settings.language': 'Sprog',
 
+	'settings.advanced': 'Avancerede indstillinger',
+
 	'api.title': 'API-nøgle (Apple Genveje)',
 	'api.description': 'Brug din API-nøgle til at tilføje ønsker fra Apple Genveje eller andre apps.',
 	'api.generate': 'Generer API-nøgle',
@@ -99,6 +101,9 @@ export default {
 	'item.pickImage': 'Vælg et billede',
 	'item.addManually': 'eller tilføj manuelt',
 	'item.edit': 'Rediger',
+	'item.favorite': 'FAVORIT',
+	'item.favoriteAdded': 'Markeret som favorit!',
+	'item.favoriteRemoved': 'Fjernet fra favoritter',
 
 	'shared.title': 'Ønskeliste fra {name}',
 	'shared.reserve': 'Reserver',
