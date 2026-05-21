@@ -1,6 +1,6 @@
 <script lang="ts">
 	import {
-		collection, query, where, getDocs, onSnapshot, orderBy,
+		collection, query, getDocs, onSnapshot, orderBy,
 		doc, getDoc, addDoc, updateDoc, deleteDoc, serverTimestamp
 	} from 'firebase/firestore';
 	import { nanoid } from 'nanoid';
@@ -17,6 +17,7 @@
 
 	let wishlist = $state<Wishlist | null>(null);
 	let ownerName = $state('');
+	let ownerId = $state<string | null>(null);
 	let items = $state<WishItemType[]>([]);
 	let reservations = $state<Record<string, Reservation>>({});
 	let loading = $state(true);
@@ -87,10 +88,10 @@
 			}
 
 			const userId = usernameDoc.data().userId;
+			ownerId = userId;
 
 			const q = query(
-				collection(db, 'wishlists'),
-				where('ownerId', '==', userId),
+				collection(db, 'users', userId, 'wishlists'),
 				orderBy('createdAt', 'desc')
 			);
 			const snap = await getDocs(q);
@@ -101,8 +102,7 @@
 			let wDocId: string;
 
 			if (snap.empty && ownerIsMe) {
-				const docRef = await addDoc(collection(db, 'wishlists'), {
-					ownerId: currentUser!.uid,
+				const docRef = await addDoc(collection(db, 'users', userId, 'wishlists'), {
 					ownerName: $userProfile?.displayName || currentUser!.email?.split('@')[0] || '',
 					title: $t('wishlist.defaultTitle'),
 					description: null,
@@ -118,7 +118,7 @@
 				wDocId = snap.docs[0].id;
 			}
 
-			const wDocRef = doc(db, 'wishlists', wDocId);
+			const wDocRef = doc(db, 'users', userId, 'wishlists', wDocId);
 
 			unsubs.push(
 				onSnapshot(wDocRef, (wSnap) => {
@@ -138,7 +138,7 @@
 			);
 
 			const itemsQuery = query(
-				collection(db, 'wishlists', wDocId, 'items'),
+				collection(db, 'users', userId, 'wishlists', wDocId, 'items'),
 				orderBy('order', 'asc')
 			);
 			unsubs.push(
@@ -152,9 +152,9 @@
 	});
 
 	$effect(() => {
-		if (!wishlistId || !confirmedNotOwner || isOwner) return;
+		if (!wishlistId || !ownerId || !confirmedNotOwner || isOwner) return;
 
-		const unsub = onSnapshot(collection(db, 'wishlists', wishlistId, 'reservations'), (resSnap) => {
+		const unsub = onSnapshot(collection(db, 'users', ownerId, 'wishlists', wishlistId, 'reservations'), (resSnap) => {
 			const res: Record<string, Reservation> = {};
 			for (const d of resSnap.docs) {
 				res[d.id] = d.data() as Reservation;
@@ -181,7 +181,7 @@
 	}
 
 	async function handleLoggedInReserve() {
-		if (!wishlist || !reservingItem) return;
+		if (!wishlist || !reservingItem || !ownerId) return;
 		const reserveFn = httpsCallable(functions, 'reserveItem');
 		await reserveFn({
 			wishlistId: wishlist.id,
@@ -189,11 +189,12 @@
 			baseUrl: window.location.origin,
 			username,
 			locale: $locale,
+			ownerId,
 		});
 	}
 
 	async function handleVisitorSendEmail(email: string) {
-		if (!wishlist || !reservingItem) return;
+		if (!wishlist || !reservingItem || !ownerId) return;
 		const normalized = email.toLowerCase().trim();
 		const requestFn = httpsCallable(functions, 'requestReservation');
 		await requestFn({
@@ -203,6 +204,7 @@
 			baseUrl: window.location.origin,
 			username,
 			locale: $locale,
+			ownerId,
 		});
 		visitorEmail = normalized;
 		if (typeof localStorage !== 'undefined') {
@@ -215,8 +217,8 @@
 		name: string; url: string; price: number | null;
 		currency: string; imageUrl: string; notes: string;
 	}) {
-		if (!wishlist) return;
-		await addDoc(collection(db, 'wishlists', wishlist.id, 'items'), {
+		if (!wishlist || !ownerId) return;
+		await addDoc(collection(db, 'users', ownerId, 'wishlists', wishlist.id, 'items'), {
 			...data,
 			url: data.url || null,
 			imageUrl: data.imageUrl || null,
@@ -229,9 +231,9 @@
 	}
 
 	async function toggleFavorite(item: WishItemType) {
-		if (!wishlist) return;
+		if (!wishlist || !ownerId) return;
 		const newVal = !item.favorite;
-		await updateDoc(doc(db, 'wishlists', wishlist.id, 'items', item.id), {
+		await updateDoc(doc(db, 'users', ownerId, 'wishlists', wishlist.id, 'items', item.id), {
 			favorite: newVal
 		});
 		showToast(newVal ? `⭐ ${$t('item.favoriteAdded')}` : $t('item.favoriteRemoved'));
@@ -241,8 +243,8 @@
 		name: string; url: string; price: number | null;
 		currency: string; imageUrl: string; notes: string;
 	}) {
-		if (!editingItem || !wishlist) return;
-		await updateDoc(doc(db, 'wishlists', wishlist.id, 'items', editingItem.id), {
+		if (!editingItem || !wishlist || !ownerId) return;
+		await updateDoc(doc(db, 'users', ownerId, 'wishlists', wishlist.id, 'items', editingItem.id), {
 			...data,
 			url: data.url || null,
 			imageUrl: data.imageUrl || null,
@@ -252,8 +254,8 @@
 	}
 
 	async function deleteItem(itemId: string) {
-		if (!wishlist || !confirm($t('item.deleteConfirm'))) return;
-		await deleteDoc(doc(db, 'wishlists', wishlist.id, 'items', itemId));
+		if (!wishlist || !ownerId || !confirm($t('item.deleteConfirm'))) return;
+		await deleteDoc(doc(db, 'users', ownerId, 'wishlists', wishlist.id, 'items', itemId));
 	}
 
 	async function copyShareLink() {

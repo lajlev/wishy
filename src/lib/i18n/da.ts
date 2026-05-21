@@ -117,7 +117,7 @@ export default {
 	'item.favoriteAdded': 'Markeret som favorit!',
 	'item.favoriteRemoved': 'Fjernet fra favoritter',
 
-	'shared.title': '{name}s ønskeliste',
+	'shared.title': '{name} ønsker sig...',
 	'shared.reserve': 'Reserver',
 	'shared.reserved': 'Reserveret',
 	'shared.reservedByOther': 'Reserveret',

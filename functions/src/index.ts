@@ -244,15 +244,14 @@ export const adminDeleteUser = onCall(
 
 		// Delete user's wishlists and sub-collections
 		const wishlistsSnap = await admin.firestore()
-			.collection('wishlists')
-			.where('ownerId', '==', uid)
+			.collection(`users/${uid}/wishlists`)
 			.get();
 
 		const batch = admin.firestore().batch();
 		for (const doc of wishlistsSnap.docs) {
-			const itemsSnap = await admin.firestore().collection(`wishlists/${doc.id}/items`).get();
+			const itemsSnap = await admin.firestore().collection(`users/${uid}/wishlists/${doc.id}/items`).get();
 			for (const item of itemsSnap.docs) batch.delete(item.ref);
-			const reservationsSnap = await admin.firestore().collection(`wishlists/${doc.id}/reservations`).get();
+			const reservationsSnap = await admin.firestore().collection(`users/${uid}/wishlists/${doc.id}/reservations`).get();
 			for (const res of reservationsSnap.docs) batch.delete(res.ref);
 			batch.delete(doc.ref);
 		}
@@ -517,8 +516,7 @@ export const addItem = onRequest(
 		const userId = userDoc.id;
 
 		const wishlistsSnap = await admin.firestore()
-			.collection('wishlists')
-			.where('ownerId', '==', userId)
+			.collection(`users/${userId}/wishlists`)
 			.limit(1)
 			.get();
 
@@ -530,7 +528,7 @@ export const addItem = onRequest(
 		const wishlistId = wishlistsSnap.docs[0].id;
 
 		const itemsSnap = await admin.firestore()
-			.collection(`wishlists/${wishlistId}/items`)
+			.collection(`users/${userId}/wishlists/${wishlistId}/items`)
 			.get();
 
 		const itemData = {
@@ -546,7 +544,7 @@ export const addItem = onRequest(
 		};
 
 		const docRef = await admin.firestore()
-			.collection(`wishlists/${wishlistId}/items`)
+			.collection(`users/${userId}/wishlists/${wishlistId}/items`)
 			.add(itemData);
 
 		res.status(201).json({ success: true, itemId: docRef.id });
@@ -665,14 +663,15 @@ ${giftCardHtml(itemData)}
 	return emailShell(locale, s.tagline, inner);
 }
 
-async function fetchItemData(wishlistId: string, itemId: string): Promise<{ name: string; imageUrl?: string | null; price?: number | null; currency?: string | null }> {
-	const itemDoc = await admin.firestore().doc(`wishlists/${wishlistId}/items/${itemId}`).get();
+async function fetchItemData(ownerId: string, wishlistId: string, itemId: string): Promise<{ name: string; imageUrl?: string | null; price?: number | null; currency?: string | null }> {
+	const itemDoc = await admin.firestore().doc(`users/${ownerId}/wishlists/${wishlistId}/items/${itemId}`).get();
 	if (!itemDoc.exists) throw new HttpsError('not-found', 'Item not found');
 	const d = itemDoc.data()!;
 	return { name: d.name, imageUrl: d.imageUrl || null, price: d.price || null, currency: d.currency || null };
 }
 
 async function createReservationAndNotify(opts: {
+	ownerId: string;
 	wishlistId: string;
 	itemId: string;
 	reservedBy: string;
@@ -686,7 +685,7 @@ async function createReservationAndNotify(opts: {
 }): Promise<void> {
 	const unreserveToken = generateToken();
 
-	await admin.firestore().doc(`wishlists/${opts.wishlistId}/reservations/${opts.itemId}`).set({
+	await admin.firestore().doc(`users/${opts.ownerId}/wishlists/${opts.wishlistId}/reservations/${opts.itemId}`).set({
 		reservedBy: opts.reservedBy,
 		reservedByName: opts.reservedByName,
 		reservedByEmail: opts.reservedByEmail,
@@ -694,6 +693,7 @@ async function createReservationAndNotify(opts: {
 	});
 
 	await admin.firestore().doc(`unreserveTokens/${unreserveToken}`).set({
+		ownerId: opts.ownerId,
 		wishlistId: opts.wishlistId,
 		itemId: opts.itemId,
 		email: opts.reservedByEmail,
@@ -717,28 +717,29 @@ async function createReservationAndNotify(opts: {
 export const requestReservation = onCall(
 	{ maxInstances: 10, secrets: [resendApiKey, resendFrom], cors: true },
 	async (request) => {
-		const { email, wishlistId, itemId, locale, baseUrl, username } = request.data;
+		const { email, wishlistId, itemId, locale, baseUrl, username, ownerId } = request.data;
 
 		if (!email || typeof email !== 'string' || !email.includes('@')) {
 			throw new HttpsError('invalid-argument', 'Valid email is required');
 		}
-		if (!wishlistId || !itemId || !baseUrl || !username) {
+		if (!wishlistId || !itemId || !baseUrl || !username || !ownerId) {
 			throw new HttpsError('invalid-argument', 'Missing required fields');
 		}
 
-		const wishlistDoc = await admin.firestore().doc(`wishlists/${wishlistId}`).get();
+		const wishlistDoc = await admin.firestore().doc(`users/${ownerId}/wishlists/${wishlistId}`).get();
 		if (!wishlistDoc.exists) throw new HttpsError('not-found', 'Wishlist not found');
 		const ownerName = wishlistDoc.data()!.ownerName || username;
 
-		const existingRes = await admin.firestore().doc(`wishlists/${wishlistId}/reservations/${itemId}`).get();
+		const existingRes = await admin.firestore().doc(`users/${ownerId}/wishlists/${wishlistId}/reservations/${itemId}`).get();
 		if (existingRes.exists) throw new HttpsError('already-exists', 'Item is already reserved');
 
-		const itemData = await fetchItemData(wishlistId, itemId);
+		const itemData = await fetchItemData(ownerId, wishlistId, itemId);
 		const token = generateToken();
 		const normalizedEmail = email.toLowerCase().trim();
 
 		await admin.firestore().doc(`pendingReservations/${token}`).set({
 			email: normalizedEmail,
+			ownerId,
 			wishlistId,
 			itemId,
 			username,
@@ -783,16 +784,17 @@ export const confirmReservation = onCall(
 			throw new HttpsError('deadline-exceeded', 'Link has expired');
 		}
 
-		const existingRes = await admin.firestore().doc(`wishlists/${pending.wishlistId}/reservations/${pending.itemId}`).get();
+		const existingRes = await admin.firestore().doc(`users/${pending.ownerId}/wishlists/${pending.wishlistId}/reservations/${pending.itemId}`).get();
 		if (existingRes.exists) {
 			await pendingDoc.ref.delete();
 			throw new HttpsError('already-exists', 'Item is already reserved');
 		}
 
-		const wishlistDoc = await admin.firestore().doc(`wishlists/${pending.wishlistId}`).get();
-		const itemData = await fetchItemData(pending.wishlistId, pending.itemId);
+		const wishlistDoc = await admin.firestore().doc(`users/${pending.ownerId}/wishlists/${pending.wishlistId}`).get();
+		const itemData = await fetchItemData(pending.ownerId, pending.wishlistId, pending.itemId);
 
 		await createReservationAndNotify({
+			ownerId: pending.ownerId,
 			wishlistId: pending.wishlistId,
 			itemId: pending.itemId,
 			reservedBy: 'visitor',
@@ -816,20 +818,20 @@ export const reserveItem = onCall(
 	async (request) => {
 		if (!request.auth) throw new HttpsError('unauthenticated', 'Must be logged in');
 
-		const { wishlistId, itemId, baseUrl, username, locale } = request.data;
+		const { wishlistId, itemId, baseUrl, username, locale, ownerId } = request.data;
 
-		if (!wishlistId || !itemId || !baseUrl || !username) {
+		if (!wishlistId || !itemId || !baseUrl || !username || !ownerId) {
 			throw new HttpsError('invalid-argument', 'Missing required fields');
 		}
 
-		const wishlistDoc = await admin.firestore().doc(`wishlists/${wishlistId}`).get();
+		const wishlistDoc = await admin.firestore().doc(`users/${ownerId}/wishlists/${wishlistId}`).get();
 		if (!wishlistDoc.exists) throw new HttpsError('not-found', 'Wishlist not found');
 
-		if (wishlistDoc.data()!.ownerId === request.auth.uid) {
+		if (ownerId === request.auth.uid) {
 			throw new HttpsError('permission-denied', 'Cannot reserve on your own list');
 		}
 
-		const existingRes = await admin.firestore().doc(`wishlists/${wishlistId}/reservations/${itemId}`).get();
+		const existingRes = await admin.firestore().doc(`users/${ownerId}/wishlists/${wishlistId}/reservations/${itemId}`).get();
 		if (existingRes.exists) throw new HttpsError('already-exists', 'Item is already reserved');
 
 		const userDoc = await admin.firestore().doc(`users/${request.auth.uid}`).get();
@@ -837,9 +839,10 @@ export const reserveItem = onCall(
 		const userEmail = userData?.email || request.auth.token.email || '';
 		const userName = userData?.displayName || userEmail.split('@')[0] || '';
 
-		const itemData = await fetchItemData(wishlistId, itemId);
+		const itemData = await fetchItemData(ownerId, wishlistId, itemId);
 
 		await createReservationAndNotify({
+			ownerId,
 			wishlistId,
 			itemId,
 			reservedBy: request.auth.uid,
@@ -870,7 +873,7 @@ export const cancelReservation = onCall(
 
 		const tokenData = tokenDoc.data()!;
 
-		const resDoc = await admin.firestore().doc(`wishlists/${tokenData.wishlistId}/reservations/${tokenData.itemId}`).get();
+		const resDoc = await admin.firestore().doc(`users/${tokenData.ownerId}/wishlists/${tokenData.wishlistId}/reservations/${tokenData.itemId}`).get();
 		if (resDoc.exists) {
 			await resDoc.ref.delete();
 		}
@@ -882,7 +885,7 @@ export const cancelReservation = onCall(
 );
 
 export const notifyNewWishlist = onDocumentCreated(
-	{ document: 'wishlists/{wishlistId}', secrets: [resendApiKey, resendFrom] },
+	{ document: 'users/{userId}/wishlists/{wishlistId}', secrets: [resendApiKey, resendFrom] },
 	async (event) => {
 		const data = event.data?.data();
 		if (!data) return;
@@ -919,7 +922,7 @@ export const notifyNewWishlist = onDocumentCreated(
 );
 
 export const generateItemEmoji = onDocumentCreated(
-	{ document: 'wishlists/{wishlistId}/items/{itemId}', secrets: [openaiApiKey] },
+	{ document: 'users/{userId}/wishlists/{wishlistId}/items/{itemId}', secrets: [openaiApiKey] },
 	async (event) => {
 		const data = event.data?.data();
 		if (!data || data.emoji) return;

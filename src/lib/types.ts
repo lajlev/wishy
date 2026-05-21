@@ -20,7 +20,6 @@ export interface PublicProfile {
 
 export interface Wishlist {
 	id: string;
-	ownerId: string;
 	title: string;
 	description: string | null;
 	shareToken: string;
