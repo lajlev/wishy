@@ -35,6 +35,7 @@ export interface WishItem {
 	price: number | null;
 	currency: string | null;
 	imageUrl: string | null;
+	emoji: string | null;
 	notes: string | null;
 	favorite: boolean;
 	order: number;
@@ -44,6 +45,7 @@ export interface WishItem {
 export interface Reservation {
 	reservedBy: string;
 	reservedByName: string;
+	reservedByEmail: string;
 	reservedAt: Timestamp;
 }
 

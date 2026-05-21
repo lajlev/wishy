@@ -1,13 +1,18 @@
 <script lang="ts">
 	import {
 		collection, query, where, getDocs, onSnapshot, orderBy,
-		doc, getDoc, setDoc, deleteDoc, serverTimestamp
+		doc, getDoc, addDoc, updateDoc, deleteDoc, serverTimestamp
 	} from 'firebase/firestore';
-	import { db } from '$lib/firebase';
-	import { user, isLoggedIn } from '$lib/stores/auth';
+	import { nanoid } from 'nanoid';
+	import { httpsCallable } from 'firebase/functions';
+	import { db, functions } from '$lib/firebase';
+	import { user, userProfile, isLoggedIn } from '$lib/stores/auth';
 	import { t } from '$lib/i18n';
+	import { locale } from '$lib/i18n';
 	import { page } from '$app/state';
 	import WishItem from '$lib/components/WishItem.svelte';
+	import WishForm from '$lib/components/WishForm.svelte';
+	import ReserveModal from '$lib/components/ReserveModal.svelte';
 	import type { Wishlist, WishItem as WishItemType, Reservation } from '$lib/types';
 
 	let wishlist = $state<Wishlist | null>(null);
@@ -16,6 +21,19 @@
 	let reservations = $state<Record<string, Reservation>>({});
 	let loading = $state(true);
 	let isOwner = $state(false);
+
+	let confirmedNotOwner = $state(false);
+
+	let visitorEmail = $state(
+		typeof localStorage !== 'undefined' ? localStorage.getItem('wishy-visitor-email') || '' : ''
+	);
+
+	let reservingItem = $state<WishItemType | null>(null);
+	let editingItem = $state<WishItemType | null>(null);
+	let addFormKey = $state(0);
+	let copied = $state(false);
+	let toast = $state('');
+	let exchangeRates = $state<Record<string, number> | null>(null);
 
 	const sortedItems = $derived(
 		[...items].sort((a, b) => {
@@ -26,6 +44,35 @@
 	);
 
 	const username = $derived(page.params.username);
+
+	const needsConfirmation = $derived(!isOwner && !confirmedNotOwner && !loading && wishlist !== null);
+	const canSeeReservations = $derived(!isOwner && confirmedNotOwner);
+
+	let toastTimer: ReturnType<typeof setTimeout>;
+
+	function showToast(msg: string) {
+		clearTimeout(toastTimer);
+		toast = msg;
+		toastTimer = setTimeout(() => (toast = ''), 3000);
+	}
+
+	$effect(() => {
+		getDoc(doc(db, 'config', 'exchangeRates')).then((snap) => {
+			if (snap.exists()) exchangeRates = snap.data().rates;
+		});
+	});
+
+	$effect(() => {
+		if (!username) return;
+		if (typeof sessionStorage !== 'undefined') {
+			const stored = sessionStorage.getItem(`wishy-confirmed-${username}`);
+			if (stored === 'true') {
+				confirmedNotOwner = true;
+			}
+		}
+	});
+
+	let wishlistId = $state<string | null>(null);
 
 	$effect(() => {
 		if (!username) return;
@@ -48,21 +95,50 @@
 			);
 			const snap = await getDocs(q);
 
-			if (snap.empty) {
+			const currentUser = $user;
+			const ownerIsMe = !!(currentUser && currentUser.uid === userId);
+
+			let wDocId: string;
+
+			if (snap.empty && ownerIsMe) {
+				const docRef = await addDoc(collection(db, 'wishlists'), {
+					ownerId: currentUser!.uid,
+					ownerName: $userProfile?.displayName || currentUser!.email?.split('@')[0] || '',
+					title: $t('wishlist.defaultTitle'),
+					description: null,
+					shareToken: nanoid(12),
+					createdAt: serverTimestamp(),
+					updatedAt: serverTimestamp()
+				});
+				wDocId = docRef.id;
+			} else if (snap.empty) {
 				loading = false;
 				return;
+			} else {
+				wDocId = snap.docs[0].id;
 			}
 
-			const wDoc = snap.docs[0];
-			const data = wDoc.data();
-			wishlist = { id: wDoc.id, ...data } as Wishlist;
-			ownerName = (data as any).ownerName || username;
+			const wDocRef = doc(db, 'wishlists', wDocId);
 
-			const currentUser = $user;
-			isOwner = !!(currentUser && wishlist.ownerId === currentUser.uid);
+			unsubs.push(
+				onSnapshot(wDocRef, (wSnap) => {
+					if (wSnap.exists()) {
+						const data = wSnap.data();
+						wishlist = { id: wSnap.id, ...data } as Wishlist;
+						wishlistId = wSnap.id;
+						ownerName = data.ownerName || username;
+						isOwner = ownerIsMe;
+
+						if (currentUser && !isOwner) {
+							confirmedNotOwner = true;
+						}
+					}
+					loading = false;
+				})
+			);
 
 			const itemsQuery = query(
-				collection(db, 'wishlists', wDoc.id, 'items'),
+				collection(db, 'wishlists', wDocId, 'items'),
 				orderBy('order', 'asc')
 			);
 			unsubs.push(
@@ -70,39 +146,121 @@
 					items = itemSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as WishItemType);
 				})
 			);
-
-			if (currentUser && !isOwner) {
-				unsubs.push(
-					onSnapshot(collection(db, 'wishlists', wDoc.id, 'reservations'), (resSnap) => {
-						const res: Record<string, Reservation> = {};
-						for (const d of resSnap.docs) {
-							res[d.id] = d.data() as Reservation;
-						}
-						reservations = res;
-					})
-				);
-			}
-
-			loading = false;
 		})();
 
 		return () => unsubs.forEach((u) => u());
 	});
 
-	async function reserve(itemId: string) {
-		const currentUser = $user;
-		if (!currentUser || !wishlist) return;
+	$effect(() => {
+		if (!wishlistId || !confirmedNotOwner || isOwner) return;
 
-		await setDoc(doc(db, 'wishlists', wishlist.id, 'reservations', itemId), {
-			reservedBy: currentUser.uid,
-			reservedByName: currentUser.displayName || currentUser.email?.split('@')[0] || '',
-			reservedAt: serverTimestamp()
+		const unsub = onSnapshot(collection(db, 'wishlists', wishlistId, 'reservations'), (resSnap) => {
+			const res: Record<string, Reservation> = {};
+			for (const d of resSnap.docs) {
+				res[d.id] = d.data() as Reservation;
+			}
+			reservations = res;
+		});
+
+		return () => unsub();
+	});
+
+	function handleConfirmNotOwner() {
+		confirmedNotOwner = true;
+		if (typeof sessionStorage !== 'undefined') {
+			sessionStorage.setItem(`wishy-confirmed-${username}`, 'true');
+		}
+	}
+
+	function openReserveModal(item: WishItemType) {
+		reservingItem = item;
+	}
+
+	function closeReserveModal() {
+		reservingItem = null;
+	}
+
+	async function handleLoggedInReserve() {
+		if (!wishlist || !reservingItem) return;
+		const reserveFn = httpsCallable(functions, 'reserveItem');
+		await reserveFn({
+			wishlistId: wishlist.id,
+			itemId: reservingItem.id,
+			baseUrl: window.location.origin,
+			username,
+			locale: $locale,
 		});
 	}
 
-	async function unreserve(itemId: string) {
+	async function handleVisitorSendEmail(email: string) {
+		if (!wishlist || !reservingItem) return;
+		const normalized = email.toLowerCase().trim();
+		const requestFn = httpsCallable(functions, 'requestReservation');
+		await requestFn({
+			email: normalized,
+			wishlistId: wishlist.id,
+			itemId: reservingItem.id,
+			baseUrl: window.location.origin,
+			username,
+			locale: $locale,
+		});
+		visitorEmail = normalized;
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem('wishy-visitor-email', normalized);
+		}
+	}
+
+	// Owner actions
+	async function addItem(data: {
+		name: string; url: string; price: number | null;
+		currency: string; imageUrl: string; notes: string;
+	}) {
 		if (!wishlist) return;
-		await deleteDoc(doc(db, 'wishlists', wishlist.id, 'reservations', itemId));
+		await addDoc(collection(db, 'wishlists', wishlist.id, 'items'), {
+			...data,
+			url: data.url || null,
+			imageUrl: data.imageUrl || null,
+			notes: data.notes || null,
+			favorite: false,
+			order: items.length,
+			createdAt: serverTimestamp()
+		});
+		addFormKey++;
+	}
+
+	async function toggleFavorite(item: WishItemType) {
+		if (!wishlist) return;
+		const newVal = !item.favorite;
+		await updateDoc(doc(db, 'wishlists', wishlist.id, 'items', item.id), {
+			favorite: newVal
+		});
+		showToast(newVal ? `⭐ ${$t('item.favoriteAdded')}` : $t('item.favoriteRemoved'));
+	}
+
+	async function updateItem(data: {
+		name: string; url: string; price: number | null;
+		currency: string; imageUrl: string; notes: string;
+	}) {
+		if (!editingItem || !wishlist) return;
+		await updateDoc(doc(db, 'wishlists', wishlist.id, 'items', editingItem.id), {
+			...data,
+			url: data.url || null,
+			imageUrl: data.imageUrl || null,
+			notes: data.notes || null
+		});
+		editingItem = null;
+	}
+
+	async function deleteItem(itemId: string) {
+		if (!wishlist || !confirm($t('item.deleteConfirm'))) return;
+		await deleteDoc(doc(db, 'wishlists', wishlist.id, 'items', itemId));
+	}
+
+	async function copyShareLink() {
+		const url = `${window.location.origin}/lists/${username}`;
+		await navigator.clipboard.writeText(url);
+		copied = true;
+		setTimeout(() => (copied = false), 2000);
 	}
 </script>
 
@@ -120,53 +278,113 @@
 		<span class="text-5xl block mb-3">🤷</span>
 		<p class="text-text-soft font-semibold">{$t('shared.notFound')}</p>
 	</div>
+{:else if needsConfirmation}
+	<div class="max-w-md mx-auto py-12">
+		<div class="bg-card rounded-2xl border-2 border-primary-light/30 p-6 shadow-lg shadow-primary/5 text-center space-y-5">
+			<span class="text-5xl block">🎁</span>
+			<h1 class="text-xl font-extrabold text-text">
+				{$t('shared.confirmNotOwner', { name: ownerName })}
+			</h1>
+			<p class="text-sm text-text-soft leading-relaxed">
+				{$t('shared.confirmNotOwnerDesc')}
+			</p>
+			<div class="space-y-3 pt-2">
+				<button
+					onclick={handleConfirmNotOwner}
+					class="w-full font-bold bg-gradient-to-r from-primary to-secondary text-white px-4 py-3 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+				>
+					{$t('shared.iAmNotOwner', { name: ownerName })}
+				</button>
+				<a
+					href="/"
+					class="block w-full text-sm font-semibold text-text-muted hover:text-text-soft transition-colors py-2"
+				>
+					{$t('shared.iAmOwner')}
+				</a>
+			</div>
+		</div>
+	</div>
 {:else}
 	<div class="space-y-6">
-		<div class="bg-card rounded-2xl border-2 border-primary-light/30 p-5 shadow-sm">
-			<h1 class="text-2xl font-extrabold text-text">
-				🎁 {$t('shared.title', { name: ownerName })}
-			</h1>
-			{#if wishlist.description}
-				<p class="text-text-muted mt-1">{wishlist.description}</p>
-			{/if}
-		</div>
-
 		{#if isOwner}
-			<div class="bg-accent-light/40 border-2 border-accent/30 rounded-2xl p-4">
-				<p class="text-sm font-semibold text-text-soft">👀 {$t('shared.ownList')}</p>
+			<div class="flex items-center justify-between">
+				<h1 class="text-2xl font-extrabold text-text">{$t('dashboard.myWishlist')}</h1>
+				<button
+					onclick={copyShareLink}
+					class="flex-shrink-0 text-sm font-bold px-4 py-2 rounded-full border-2 transition-all active:scale-95 {copied ? 'border-success/50 text-success bg-success/10' : 'border-secondary/30 text-secondary hover:border-secondary hover:bg-secondary/10'}"
+				>
+					{copied ? '✅ ' : '🔗 '}{copied ? $t('wishlist.copied') : $t('wishlist.share')}
+				</button>
+			</div>
+		{:else}
+			<div>
+				<h1 class="text-2xl font-extrabold text-text">
+					{$t('shared.title', { name: ownerName })}
+				</h1>
+				{#if wishlist.description}
+					<p class="text-text-muted mt-1">{wishlist.description}</p>
+				{/if}
 			</div>
 		{/if}
 
-		{#if !$isLoggedIn}
-			<div class="bg-primary-light/20 border-2 border-primary-light/40 rounded-2xl p-4 text-center">
-				<a
-					href="/login?redirect={encodeURIComponent(`/lists/${username}`)}"
-					class="text-sm font-bold text-primary hover:text-primary-dark transition-colors"
-				>
-					✨ {$t('shared.loginToReserve')}
-				</a>
+		{#if items.length === 0}
+			<div class="text-center py-6">
+				<span class="text-4xl block mb-2">🌈</span>
+				<p class="text-text-soft font-semibold">{$t('wishlist.empty')}</p>
 			</div>
 		{/if}
 
 		<div class="space-y-3">
 			{#each sortedItems as item (item.id)}
-				<WishItem
-					{item}
-					reservation={reservations[item.id] || null}
-					isShared={true}
-					isOwner={isOwner}
-					currentUserId={$user?.uid || ''}
-					onreserve={() => reserve(item.id)}
-					onunreserve={() => unreserve(item.id)}
-				/>
+				{#if isOwner && editingItem?.id === item.id}
+					<WishForm
+						initialName={item.name}
+						initialUrl={item.url || ''}
+						initialPrice={item.price?.toString() || ''}
+						initialCurrency={item.currency || 'DKK'}
+						initialImageUrl={item.imageUrl || ''}
+						initialNotes={item.notes || ''}
+						onsave={updateItem}
+						oncancel={() => (editingItem = null)}
+					/>
+				{:else}
+					<WishItem
+						{item}
+						reservation={canSeeReservations ? (reservations[item.id] || null) : null}
+						isShared={!isOwner}
+						{isOwner}
+						currentUserId={$user?.uid || ''}
+						{visitorEmail}
+						{exchangeRates}
+						onedit={() => (editingItem = item)}
+						ondelete={() => deleteItem(item.id)}
+						ontogglefavorite={() => toggleFavorite(item)}
+						onreserve={() => openReserveModal(item)}
+					/>
+				{/if}
 			{/each}
 		</div>
 
-		{#if items.length === 0}
-			<div class="text-center py-12">
-				<span class="text-5xl block mb-3">🌈</span>
-				<p class="text-text-soft font-semibold">{$t('wishlist.empty')}</p>
-			</div>
+		{#if isOwner}
+			{#key addFormKey}
+				<WishForm onsave={addItem} />
+			{/key}
 		{/if}
+	</div>
+{/if}
+
+{#if reservingItem}
+	<ReserveModal
+		item={reservingItem}
+		isLoggedIn={$isLoggedIn}
+		onclose={closeReserveModal}
+		onconfirm={handleLoggedInReserve}
+		onsend={handleVisitorSendEmail}
+	/>
+{/if}
+
+{#if toast}
+	<div class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-text text-white text-sm font-bold px-5 py-2.5 rounded-full shadow-lg animate-pop-in z-50">
+		{toast}
 	</div>
 {/if}

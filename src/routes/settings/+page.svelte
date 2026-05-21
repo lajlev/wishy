@@ -1,14 +1,59 @@
 <script lang="ts">
-	import { userProfile, uploadPhoto, generateApiKey } from '$lib/stores/auth';
+	import { userProfile, uploadPhoto, updateDisplayName, generateApiKey } from '$lib/stores/auth';
 	import { t } from '$lib/i18n';
 	import AuthGuard from '$lib/components/AuthGuard.svelte';
 	import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 
+	let editingProfile = $state(false);
+	let nameInput = $state('');
+	let savingProfile = $state(false);
 	let uploadingPhoto = $state(false);
+	let photoFile = $state<File | null>(null);
+	let photoPreview = $state<string | null>(null);
+
 	let showAdvanced = $state(false);
 	let showApiKey = $state(false);
 	let generatingKey = $state(false);
 	let apiKeyCopied = $state(false);
+
+	function startEditingProfile() {
+		nameInput = $userProfile?.displayName || '';
+		photoFile = null;
+		photoPreview = null;
+		editingProfile = true;
+	}
+
+	function cancelEditingProfile() {
+		editingProfile = false;
+		photoFile = null;
+		photoPreview = null;
+	}
+
+	function handlePhotoSelect(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		photoFile = file;
+		photoPreview = URL.createObjectURL(file);
+	}
+
+	async function saveProfile() {
+		const val = nameInput.trim();
+		if (!val) return;
+		savingProfile = true;
+		try {
+			await updateDisplayName(val);
+			if (photoFile) {
+				await uploadPhoto(photoFile);
+			}
+		} catch {
+			// silently fail
+		}
+		savingProfile = false;
+		editingProfile = false;
+		photoFile = null;
+		photoPreview = null;
+	}
 
 	async function handlePhotoChange(e: Event) {
 		const input = e.target as HTMLInputElement;
@@ -47,36 +92,99 @@
 
 		<!-- Profile section -->
 		<div class="bg-card rounded-2xl border-2 border-primary-light/30 p-5 shadow-sm">
-			<div class="flex items-center gap-4">
-				<label class="relative cursor-pointer group flex-shrink-0">
-					{#if $userProfile?.photoUrl}
-						<img
-							src={$userProfile.photoUrl}
-							alt="Profile"
-							class="w-16 h-16 rounded-full object-cover border-2 border-primary-light/40 group-hover:border-primary/50 transition-colors"
-						/>
-					{:else}
-						<div class="w-16 h-16 rounded-full bg-gradient-to-br from-primary-light to-secondary-light flex items-center justify-center text-2xl border-2 border-primary-light/40 group-hover:border-primary/50 transition-colors">
-							{($userProfile?.displayName || $userProfile?.username || '?').charAt(0).toUpperCase()}
-						</div>
-					{/if}
-					<div class="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-						<span class="text-white text-xs font-bold">{uploadingPhoto ? '...' : $t('profile.changePhoto')}</span>
+			{#if editingProfile}
+				<form onsubmit={(e) => { e.preventDefault(); saveProfile(); }} class="space-y-4">
+					<div class="flex justify-center">
+						<label class="relative cursor-pointer group">
+							{#if photoPreview}
+								<img
+									src={photoPreview}
+									alt="Profile"
+									class="w-20 h-20 rounded-full object-cover border-2 border-primary-light/40 group-hover:border-primary/50 transition-colors"
+								/>
+							{:else if $userProfile?.photoUrl}
+								<img
+									src={$userProfile.photoUrl}
+									alt="Profile"
+									class="w-20 h-20 rounded-full object-cover border-2 border-primary-light/40 group-hover:border-primary/50 transition-colors"
+								/>
+							{:else}
+								<div class="w-20 h-20 rounded-full bg-gradient-to-br from-primary-light to-secondary-light flex items-center justify-center text-3xl border-2 border-primary-light/40 group-hover:border-primary/50 transition-colors">
+									{(nameInput || $userProfile?.username || '?').charAt(0).toUpperCase()}
+								</div>
+							{/if}
+							<div class="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+								<span class="text-white text-xs font-bold">{$t('profile.changePhoto')}</span>
+							</div>
+							<input
+								type="file"
+								accept="image/*"
+								class="hidden"
+								onchange={handlePhotoSelect}
+							/>
+						</label>
 					</div>
-					<input
-						type="file"
-						accept="image/*"
-						class="hidden"
-						onchange={handlePhotoChange}
-						disabled={uploadingPhoto}
-					/>
-				</label>
-				<div class="flex-1 min-w-0">
-					<p class="font-bold text-text truncate">{$userProfile?.displayName || $userProfile?.username}</p>
-					<p class="text-sm text-text-muted">@{$userProfile?.username}</p>
-					<p class="text-xs text-text-muted">{$userProfile?.email}</p>
+
+					<div>
+						<label for="editName" class="block text-sm font-bold text-text mb-1.5">
+							{$t('signup.name')}
+						</label>
+						<input
+							id="editName"
+							type="text"
+							bind:value={nameInput}
+							required
+							maxlength="50"
+							placeholder={$t('signup.namePlaceholder')}
+							class="w-full rounded-xl border-2 border-primary-light/30 px-4 py-3 text-sm text-text bg-surface/50 placeholder:text-text-muted"
+						/>
+					</div>
+
+					<div class="flex gap-2">
+						<button
+							type="submit"
+							disabled={!nameInput.trim() || savingProfile}
+							class="flex-1 font-bold bg-gradient-to-r from-primary to-secondary text-white px-4 py-2.5 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 disabled:opacity-50 transition-all active:scale-95"
+						>
+							{savingProfile ? $t('username.saving') : $t('profile.save')}
+						</button>
+						<button
+							type="button"
+							onclick={cancelEditingProfile}
+							class="font-semibold text-text-soft px-5 py-2.5 rounded-full text-sm border-2 border-primary-light/30 hover:bg-surface-dark transition-all active:scale-95"
+						>
+							{$t('wishlist.cancel')}
+						</button>
+					</div>
+				</form>
+			{:else}
+				<div class="flex items-center gap-4">
+					<div class="flex-shrink-0">
+						{#if $userProfile?.photoUrl}
+							<img
+								src={$userProfile.photoUrl}
+								alt="Profile"
+								class="w-16 h-16 rounded-full object-cover border-2 border-primary-light/40"
+							/>
+						{:else}
+							<div class="w-16 h-16 rounded-full bg-gradient-to-br from-primary-light to-secondary-light flex items-center justify-center text-2xl border-2 border-primary-light/40">
+								{($userProfile?.displayName || $userProfile?.username || '?').charAt(0).toUpperCase()}
+							</div>
+						{/if}
+					</div>
+					<div class="flex-1 min-w-0">
+						<p class="font-bold text-text truncate">{$userProfile?.displayName || $userProfile?.username}</p>
+						<p class="text-sm text-text-muted">@{$userProfile?.username}</p>
+						<p class="text-xs text-text-muted">{$userProfile?.email}</p>
+					</div>
+					<button
+						onclick={startEditingProfile}
+						class="flex-shrink-0 text-sm font-semibold text-text-soft hover:text-primary px-3 py-1.5 rounded-full border-2 border-primary-light/30 hover:border-primary/50 hover:bg-primary-light/10 transition-all active:scale-95"
+					>
+						{$t('profile.edit')}
+					</button>
 				</div>
-			</div>
+			{/if}
 		</div>
 
 		<!-- Language -->

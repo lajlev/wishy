@@ -8,10 +8,11 @@
 		isOwner = false,
 		isShared = false,
 		currentUserId = '',
+		visitorEmail = '',
+		exchangeRates = null,
 		ondelete,
 		onedit,
 		onreserve,
-		onunreserve,
 		ontogglefavorite
 	}: {
 		item: WishItem;
@@ -19,14 +20,25 @@
 		isOwner?: boolean;
 		isShared?: boolean;
 		currentUserId?: string;
+		visitorEmail?: string;
+		exchangeRates?: Record<string, number> | null;
 		ondelete?: () => void;
 		onedit?: () => void;
 		onreserve?: () => void;
-		onunreserve?: () => void;
 		ontogglefavorite?: () => void;
 	} = $props();
 
-	const isReservedByMe = $derived(reservation?.reservedBy === currentUserId);
+	const approxDKK = $derived.by(() => {
+		if (!item.price || !item.currency || item.currency === 'DKK' || !exchangeRates) return null;
+		const rate = exchangeRates[item.currency];
+		if (!rate) return null;
+		return Math.round(item.price * rate);
+	});
+
+	const isReservedByMe = $derived(
+		(currentUserId && reservation?.reservedBy === currentUserId) ||
+		(visitorEmail && reservation?.reservedByEmail === visitorEmail)
+	);
 	const isReservedByOther = $derived(reservation !== null && !isReservedByMe);
 </script>
 
@@ -39,6 +51,10 @@
 			alt={item.name}
 			class="w-20 h-20 object-cover rounded-xl flex-shrink-0 border-2 border-primary-light/20"
 		/>
+	{:else}
+		<div class="w-20 h-20 rounded-xl flex-shrink-0 border-2 border-primary-light/20 bg-primary-light/10 flex items-center justify-center">
+			<span class="text-3xl">{item.emoji || '🎁'}</span>
+		</div>
 	{/if}
 
 	<div class="flex-1 min-w-0">
@@ -53,6 +69,9 @@
 				{#if item.price}
 					<p class="text-sm text-primary font-bold mt-0.5">
 						{item.price} {item.currency || 'DKK'}
+						{#if approxDKK}
+							<span class="font-normal text-text-muted">(~{approxDKK} DKK)</span>
+						{/if}
 					</p>
 				{/if}
 			</div>
@@ -102,13 +121,7 @@
 
 			{#if isShared && !isOwner}
 				{#if isReservedByMe}
-					<button
-						onclick={onunreserve}
-						class="text-xs font-bold bg-gradient-to-r from-primary to-primary-dark text-white px-4 py-1.5 rounded-full hover:shadow-md hover:shadow-primary/20 transition-all active:scale-95"
-					>
-						{$t('shared.unreserve')}
-					</button>
-					<span class="text-xs font-semibold text-primary">✨ {$t('shared.reservedByYou')}</span>
+					<span class="text-xs font-semibold text-primary">✨ {$t('shared.reservedByYouEmail')}</span>
 				{:else if isReservedByOther}
 					<span class="text-xs font-semibold text-text-muted">🎀 {$t('shared.reservedByOther')}</span>
 				{:else}

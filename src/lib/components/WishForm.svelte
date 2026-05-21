@@ -79,7 +79,11 @@
 				const data = result.data;
 
 				if (data.name && !name) name = data.name;
-				if (data.price && !price) price = data.price;
+				if (data.price && !price) {
+					const cleaned = String(data.price).replace(/[^\d.,]/g, '').replace(',', '.');
+					const parsed = parseFloat(cleaned);
+					if (!isNaN(parsed)) price = String(parsed);
+				}
 				if (data.currency) currency = data.currency;
 				if (data.notes && !notes) notes = data.notes;
 
@@ -104,6 +108,17 @@
 
 	function selectImage(src: string) {
 		imageUrl = src;
+	}
+
+	function clearForm() {
+		name = '';
+		url = '';
+		price = '';
+		currency = 'DKK';
+		imageUrl = '';
+		notes = '';
+		candidateImages = [];
+		showFields = false;
 	}
 
 	function handleSubmit(e: Event) {
@@ -187,7 +202,7 @@
 			{#if candidateImages.length > 1}
 				<div>
 					<p class="text-sm font-bold text-text mb-2">📸 {$t('item.pickImage')}</p>
-					<div class="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 snap-x">
+					<div class="flex gap-2 overflow-x-auto py-2 -mx-2 px-2 snap-x">
 						{#each candidateImages as src (src)}
 							<button
 								type="button"
@@ -279,6 +294,15 @@
 						class="font-semibold text-text-soft px-5 py-2.5 rounded-full text-sm border-2 border-primary-light/30 hover:bg-surface-dark transition-all active:scale-95"
 					>
 						{$t('wishlist.cancel')}
+					</button>
+				{/if}
+				{#if !isEditing}
+					<button
+						type="button"
+						onclick={clearForm}
+						class="ml-auto text-xs font-semibold text-text-muted hover:text-primary transition-colors"
+					>
+						{$t('item.clear')}
 					</button>
 				{/if}
 			</div>

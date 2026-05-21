@@ -33,7 +33,7 @@
 				{$t('nav.about')}
 			</a>
 			{#if $isLoggedIn}
-				<a href="/my-list" class="text-sm font-semibold text-text-soft hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-primary-light/20">
+				<a href={$userProfile?.username ? `/lists/${$userProfile.username}` : '/my-list'} class="text-sm font-semibold text-text-soft hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-primary-light/20">
 					{$t('nav.myList')}
 				</a>
 
@@ -88,7 +88,7 @@
 					href="/login"
 					class="font-bold bg-gradient-to-r from-primary to-secondary text-white px-4 py-1.5 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
 				>
-					✨ {$t('home.createYours')}
+					{$t('nav.login')}
 				</a>
 			{/if}
 		</div>

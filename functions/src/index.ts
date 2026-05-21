@@ -1,9 +1,12 @@
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import * as admin from 'firebase-admin';
 import { Resend } from 'resend';
 import ogs from 'open-graph-scraper';
 import OpenAI from 'openai';
+import { randomBytes } from 'crypto';
 
 admin.initializeApp();
 
@@ -441,7 +444,7 @@ Return JSON only, no markdown:
 				if (jsonMatch) {
 					const parsed = JSON.parse(jsonMatch[0]);
 					if (parsed.name) cleanedName = parsed.name;
-					if (parsed.price && !extractedPrice) {
+					if (parsed.price != null && parsed.price !== 0 && !extractedPrice) {
 						extractedPrice = String(parsed.price);
 					}
 					if (parsed.currency && !extractedCurrency) {
@@ -549,3 +552,407 @@ export const addItem = onRequest(
 		res.status(201).json({ success: true, itemId: docRef.id });
 	}
 );
+
+function generateToken(): string {
+	return randomBytes(24).toString('base64url');
+}
+
+const reserveRequestStrings: Record<string, Record<string, string>> = {
+	da: {
+		subject: 'Bekræft reservation af {giftName} til {userName} 🎁',
+		heading: 'Vil du reservere {giftName} til {userName}?',
+		button: '🎁 Reserver gave',
+		expiry: 'Linket udløber om 1 time.',
+		ignore: 'Hvis du ikke har bedt om dette, kan du ignorere denne email.',
+		tagline: 'Din families ønskeliste',
+	},
+	en: {
+		subject: 'Confirm reservation of {giftName} for {userName} 🎁',
+		heading: 'Want to reserve {giftName} for {userName}?',
+		button: '🎁 Reserve gift',
+		expiry: 'This link expires in 1 hour.',
+		ignore: "If you didn't request this, you can safely ignore this email.",
+		tagline: 'Your family wishlist',
+	},
+};
+
+const reserveConfirmStrings: Record<string, Record<string, string>> = {
+	da: {
+		subject: '{giftName} til {userName} er reserveret ✨',
+		heading: 'Du har reserveret {giftName} til {userName}',
+		body: '',
+		unreserve: 'Fortryd reservation',
+		tagline: 'Din families ønskeliste',
+	},
+	en: {
+		subject: '{giftName} for {userName} is reserved ✨',
+		heading: 'You reserved {giftName} for {userName}',
+		body: '',
+		unreserve: 'Cancel reservation',
+		tagline: 'Your family wishlist',
+	},
+};
+
+function giftCardHtml(itemData: { name: string; imageUrl?: string | null; price?: number | null; currency?: string | null }): string {
+	const img = itemData.imageUrl
+		? `<img src="${itemData.imageUrl}" alt="${itemData.name}" style="width:80px;height:80px;object-fit:cover;border-radius:12px;border:2px solid rgba(249,168,196,0.3);" />`
+		: '';
+	const price = itemData.price
+		? `<p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#e8567f;">${itemData.price} ${itemData.currency || 'DKK'}</p>`
+		: '';
+	return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f4;border-radius:16px;border:2px solid rgba(249,168,196,0.2);margin:20px 0;">
+<tr><td style="padding:16px;text-align:center;">
+	${img}
+	<p style="margin:8px 0 0;font-size:18px;font-weight:800;color:#2e1065;">${itemData.name}</p>
+	${price}
+</td></tr>
+</table>`;
+}
+
+function emailShell(locale: string, tagline: string, innerHtml: string): string {
+	return `<!DOCTYPE html>
+<html lang="${locale}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background-color:#fdf8f4;font-family:'Nunito',system-ui,-apple-system,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fdf8f4;min-height:100vh;">
+<tr><td align="center" style="padding:40px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;">
+<tr><td align="center" style="padding-bottom:32px;">
+	<span style="font-size:48px;line-height:1;">🎁</span><br>
+	<span style="font-size:28px;font-weight:800;background:linear-gradient(to right,#e8567f,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Wishy</span><br>
+	<span style="font-size:14px;color:#6b5a8a;font-weight:500;">${tagline}</span>
+</td></tr>
+<tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:20px;border:2px solid rgba(249,168,196,0.3);box-shadow:0 4px 24px rgba(232,86,127,0.08);">
+<tr><td style="padding:40px 36px;text-align:center;">
+${innerHtml}
+</td></tr>
+</table>
+</td></tr>
+<tr><td align="center" style="padding-top:28px;">
+	<p style="margin:0;font-size:12px;color:#9b8ab8;">Wishy &mdash; ${tagline}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+function buildReserveRequestEmail(confirmUrl: string, itemData: { name: string; imageUrl?: string | null; price?: number | null; currency?: string | null }, ownerName: string, locale: string): string {
+	const s = reserveRequestStrings[locale] || reserveRequestStrings['da'];
+	const heading = s.heading.replace('{giftName}', itemData.name).replace('{userName}', ownerName);
+	const inner = `<h1 style="margin:0 0 4px;font-size:24px;font-weight:800;color:#2e1065;">${heading}</h1>
+${giftCardHtml(itemData)}
+<a href="${confirmUrl}" target="_blank" style="display:inline-block;background:linear-gradient(to right,#16a34a,#059669);color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;padding:14px 48px;border-radius:50px;box-shadow:0 4px 16px rgba(22,163,74,0.25);">
+	${s.button}
+</a>
+<p style="margin:20px 0 0;font-size:13px;color:#9b8ab8;">${s.expiry}<br>${s.ignore}</p>`;
+	return emailShell(locale, s.tagline, inner);
+}
+
+function buildReserveConfirmEmail(itemData: { name: string; imageUrl?: string | null; price?: number | null; currency?: string | null }, unreserveUrl: string, ownerName: string, locale: string): string {
+	const s = reserveConfirmStrings[locale] || reserveConfirmStrings['da'];
+	const heading = s.heading.replace('{giftName}', itemData.name).replace('{userName}', ownerName);
+	const inner = `<h1 style="margin:0 0 4px;font-size:24px;font-weight:800;color:#2e1065;">${heading}</h1>
+${giftCardHtml(itemData)}
+<a href="${unreserveUrl}" target="_blank" style="display:inline-block;color:#e8567f;font-size:14px;font-weight:600;text-decoration:underline;">
+	${s.unreserve}
+</a>`;
+	return emailShell(locale, s.tagline, inner);
+}
+
+async function fetchItemData(wishlistId: string, itemId: string): Promise<{ name: string; imageUrl?: string | null; price?: number | null; currency?: string | null }> {
+	const itemDoc = await admin.firestore().doc(`wishlists/${wishlistId}/items/${itemId}`).get();
+	if (!itemDoc.exists) throw new HttpsError('not-found', 'Item not found');
+	const d = itemDoc.data()!;
+	return { name: d.name, imageUrl: d.imageUrl || null, price: d.price || null, currency: d.currency || null };
+}
+
+async function createReservationAndNotify(opts: {
+	wishlistId: string;
+	itemId: string;
+	reservedBy: string;
+	reservedByName: string;
+	reservedByEmail: string;
+	itemData: { name: string; imageUrl?: string | null; price?: number | null; currency?: string | null };
+	baseUrl: string;
+	username: string;
+	ownerName: string;
+	locale: string;
+}): Promise<void> {
+	const unreserveToken = generateToken();
+
+	await admin.firestore().doc(`wishlists/${opts.wishlistId}/reservations/${opts.itemId}`).set({
+		reservedBy: opts.reservedBy,
+		reservedByName: opts.reservedByName,
+		reservedByEmail: opts.reservedByEmail,
+		reservedAt: admin.firestore.FieldValue.serverTimestamp(),
+	});
+
+	await admin.firestore().doc(`unreserveTokens/${unreserveToken}`).set({
+		wishlistId: opts.wishlistId,
+		itemId: opts.itemId,
+		email: opts.reservedByEmail,
+		username: opts.username,
+		createdAt: admin.firestore.FieldValue.serverTimestamp(),
+	});
+
+	const unreserveUrl = `${opts.baseUrl}/reserve/cancel?token=${unreserveToken}`;
+	const lang = opts.locale === 'en' ? 'en' : 'da';
+	const s = reserveConfirmStrings[lang];
+
+	const resend = new Resend(resendApiKey.value());
+	await resend.emails.send({
+		from: `Wishy 🎁 <${resendFrom.value()}>`,
+		to: opts.reservedByEmail,
+		subject: s.subject.replace('{giftName}', opts.itemData.name).replace('{userName}', opts.ownerName),
+		html: buildReserveConfirmEmail(opts.itemData, unreserveUrl, opts.ownerName, lang),
+	});
+}
+
+export const requestReservation = onCall(
+	{ maxInstances: 10, secrets: [resendApiKey, resendFrom], cors: true },
+	async (request) => {
+		const { email, wishlistId, itemId, locale, baseUrl, username } = request.data;
+
+		if (!email || typeof email !== 'string' || !email.includes('@')) {
+			throw new HttpsError('invalid-argument', 'Valid email is required');
+		}
+		if (!wishlistId || !itemId || !baseUrl || !username) {
+			throw new HttpsError('invalid-argument', 'Missing required fields');
+		}
+
+		const wishlistDoc = await admin.firestore().doc(`wishlists/${wishlistId}`).get();
+		if (!wishlistDoc.exists) throw new HttpsError('not-found', 'Wishlist not found');
+		const ownerName = wishlistDoc.data()!.ownerName || username;
+
+		const existingRes = await admin.firestore().doc(`wishlists/${wishlistId}/reservations/${itemId}`).get();
+		if (existingRes.exists) throw new HttpsError('already-exists', 'Item is already reserved');
+
+		const itemData = await fetchItemData(wishlistId, itemId);
+		const token = generateToken();
+		const normalizedEmail = email.toLowerCase().trim();
+
+		await admin.firestore().doc(`pendingReservations/${token}`).set({
+			email: normalizedEmail,
+			wishlistId,
+			itemId,
+			username,
+			baseUrl,
+			locale: locale || 'da',
+			expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+			createdAt: admin.firestore.FieldValue.serverTimestamp(),
+		});
+
+		const confirmUrl = `${baseUrl}/reserve/confirm?token=${token}`;
+		const lang = locale === 'en' ? 'en' : 'da';
+		const s = reserveRequestStrings[lang];
+
+		const resend = new Resend(resendApiKey.value());
+		await resend.emails.send({
+			from: `Wishy 🎁 <${resendFrom.value()}>`,
+			to: normalizedEmail,
+			subject: s.subject.replace('{giftName}', itemData.name).replace('{userName}', ownerName),
+			html: buildReserveRequestEmail(confirmUrl, itemData, ownerName, lang),
+		});
+
+		return { success: true };
+	}
+);
+
+export const confirmReservation = onCall(
+	{ maxInstances: 10, secrets: [resendApiKey, resendFrom], cors: true },
+	async (request) => {
+		const { token } = request.data;
+
+		if (!token || typeof token !== 'string') {
+			throw new HttpsError('invalid-argument', 'Token is required');
+		}
+
+		const pendingDoc = await admin.firestore().doc(`pendingReservations/${token}`).get();
+		if (!pendingDoc.exists) throw new HttpsError('not-found', 'Invalid or expired link');
+
+		const pending = pendingDoc.data()!;
+
+		if (pending.expiresAt.toDate() < new Date()) {
+			await pendingDoc.ref.delete();
+			throw new HttpsError('deadline-exceeded', 'Link has expired');
+		}
+
+		const existingRes = await admin.firestore().doc(`wishlists/${pending.wishlistId}/reservations/${pending.itemId}`).get();
+		if (existingRes.exists) {
+			await pendingDoc.ref.delete();
+			throw new HttpsError('already-exists', 'Item is already reserved');
+		}
+
+		const wishlistDoc = await admin.firestore().doc(`wishlists/${pending.wishlistId}`).get();
+		const itemData = await fetchItemData(pending.wishlistId, pending.itemId);
+
+		await createReservationAndNotify({
+			wishlistId: pending.wishlistId,
+			itemId: pending.itemId,
+			reservedBy: 'visitor',
+			reservedByName: pending.email.split('@')[0],
+			reservedByEmail: pending.email,
+			itemData,
+			baseUrl: pending.baseUrl,
+			username: pending.username,
+			ownerName: wishlistDoc.data()?.ownerName || pending.username,
+			locale: pending.locale,
+		});
+
+		await pendingDoc.ref.delete();
+
+		return { success: true, username: pending.username, email: pending.email };
+	}
+);
+
+export const reserveItem = onCall(
+	{ maxInstances: 10, secrets: [resendApiKey, resendFrom], cors: true },
+	async (request) => {
+		if (!request.auth) throw new HttpsError('unauthenticated', 'Must be logged in');
+
+		const { wishlistId, itemId, baseUrl, username, locale } = request.data;
+
+		if (!wishlistId || !itemId || !baseUrl || !username) {
+			throw new HttpsError('invalid-argument', 'Missing required fields');
+		}
+
+		const wishlistDoc = await admin.firestore().doc(`wishlists/${wishlistId}`).get();
+		if (!wishlistDoc.exists) throw new HttpsError('not-found', 'Wishlist not found');
+
+		if (wishlistDoc.data()!.ownerId === request.auth.uid) {
+			throw new HttpsError('permission-denied', 'Cannot reserve on your own list');
+		}
+
+		const existingRes = await admin.firestore().doc(`wishlists/${wishlistId}/reservations/${itemId}`).get();
+		if (existingRes.exists) throw new HttpsError('already-exists', 'Item is already reserved');
+
+		const userDoc = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+		const userData = userDoc.data();
+		const userEmail = userData?.email || request.auth.token.email || '';
+		const userName = userData?.displayName || userEmail.split('@')[0] || '';
+
+		const itemData = await fetchItemData(wishlistId, itemId);
+
+		await createReservationAndNotify({
+			wishlistId,
+			itemId,
+			reservedBy: request.auth.uid,
+			reservedByName: userName,
+			reservedByEmail: userEmail,
+			itemData,
+			baseUrl,
+			username,
+			ownerName: wishlistDoc.data()!.ownerName || username,
+			locale: locale || 'da',
+		});
+
+		return { success: true };
+	}
+);
+
+export const cancelReservation = onCall(
+	{ maxInstances: 10, cors: true },
+	async (request) => {
+		const { token } = request.data;
+
+		if (!token || typeof token !== 'string') {
+			throw new HttpsError('invalid-argument', 'Token is required');
+		}
+
+		const tokenDoc = await admin.firestore().doc(`unreserveTokens/${token}`).get();
+		if (!tokenDoc.exists) throw new HttpsError('not-found', 'Invalid link');
+
+		const tokenData = tokenDoc.data()!;
+
+		const resDoc = await admin.firestore().doc(`wishlists/${tokenData.wishlistId}/reservations/${tokenData.itemId}`).get();
+		if (resDoc.exists) {
+			await resDoc.ref.delete();
+		}
+
+		await tokenDoc.ref.delete();
+
+		return { success: true, username: tokenData.username || '' };
+	}
+);
+
+export const notifyNewWishlist = onDocumentCreated(
+	{ document: 'wishlists/{wishlistId}', secrets: [resendApiKey, resendFrom] },
+	async (event) => {
+		const data = event.data?.data();
+		if (!data) return;
+
+		const resend = new Resend(resendApiKey.value());
+		await resend.emails.send({
+			from: `Wishy 🎁 <${resendFrom.value()}>`,
+			to: ADMIN_EMAIL,
+			subject: 'New wishlist created on Wishy 🎉',
+			html: `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background-color:#fdf8f4;font-family:system-ui,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fdf8f4;">
+<tr><td align="center" style="padding:40px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;">
+<tr><td align="center" style="padding-bottom:24px;">
+	<span style="font-size:48px;">🎉</span>
+</td></tr>
+<tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:20px;border:2px solid rgba(249,168,196,0.3);">
+<tr><td style="padding:32px;text-align:center;">
+	<h1 style="margin:0 0 16px;font-size:20px;color:#2e1065;">New wishlist created!</h1>
+	<p style="margin:0 0 8px;font-size:16px;color:#6b5a8a;"><strong>${data.ownerName || 'Someone'}</strong> just created a wishlist.</p>
+	<p style="margin:0;font-size:14px;color:#9b8ab8;">Title: ${data.title || 'Untitled'}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`,
+		});
+	}
+);
+
+export const generateItemEmoji = onDocumentCreated(
+	{ document: 'wishlists/{wishlistId}/items/{itemId}', secrets: [openaiApiKey] },
+	async (event) => {
+		const data = event.data?.data();
+		if (!data || data.emoji) return;
+
+		try {
+			const openai = new OpenAI({ apiKey: openaiApiKey.value() });
+			const completion = await openai.chat.completions.create({
+				model: 'gpt-5.4-nano',
+				messages: [{ role: 'user', content: `Pick one emoji that best represents this gift: "${data.name}". Reply with only the emoji, nothing else.` }],
+				temperature: 0.5,
+				max_tokens: 5,
+			});
+
+			const emoji = completion.choices[0]?.message?.content?.trim() || '🎁';
+			await event.data?.ref.update({ emoji });
+		} catch {
+			await event.data?.ref.update({ emoji: '🎁' });
+		}
+	}
+);
+
+// ── Exchange rates (weekly) ─────────────────────────────────────────
+export const updateExchangeRates = onSchedule('every monday 06:00', async () => {
+	const res = await fetch('https://api.frankfurter.dev/v1/latest?base=DKK');
+	if (!res.ok) throw new Error(`Frankfurter API error: ${res.status}`);
+	const data = await res.json() as { rates: Record<string, number> };
+	const toDKK: Record<string, number> = {};
+	for (const [currency, rate] of Object.entries(data.rates)) {
+		toDKK[currency] = Math.round((1 / rate) * 10000) / 10000;
+	}
+	toDKK['DKK'] = 1;
+	await admin.firestore().doc('config/exchangeRates').set({
+		rates: toDKK,
+		updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+	});
+});

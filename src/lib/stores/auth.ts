@@ -52,17 +52,31 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
 	return !snap.exists();
 }
 
-export async function claimUsername(username: string): Promise<void> {
+export async function claimUsername(username: string, displayName: string): Promise<void> {
 	const currentUser = auth.currentUser;
 	if (!currentUser) throw new Error('Not authenticated');
 
 	await setDoc(doc(db, 'usernames', username), {
 		userId: currentUser.uid,
-		displayName: currentUser.displayName || currentUser.email?.split('@')[0] || '',
+		displayName,
 	});
-	await updateDoc(doc(db, 'users', currentUser.uid), { username });
+	await updateDoc(doc(db, 'users', currentUser.uid), { username, displayName });
 
-	userProfileStore.update((p) => p ? { ...p, username } : p);
+	userProfileStore.update((p) => p ? { ...p, username, displayName } : p);
+}
+
+export async function updateDisplayName(displayName: string): Promise<void> {
+	const currentUser = auth.currentUser;
+	if (!currentUser) throw new Error('Not authenticated');
+
+	await updateDoc(doc(db, 'users', currentUser.uid), { displayName });
+
+	let profile: UserProfile | null = null;
+	userProfileStore.update((p) => { profile = p; return p ? { ...p, displayName } : p; });
+
+	if (profile && (profile as UserProfile).username) {
+		await updateDoc(doc(db, 'usernames', (profile as UserProfile).username!), { displayName });
+	}
 }
 
 export async function uploadPhoto(file: File): Promise<string> {
