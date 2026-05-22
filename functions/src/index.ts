@@ -341,78 +341,67 @@ function extractAllImages(html: string, baseUrl: string): string[] {
 	return images.slice(0, 12).map((i) => i.url);
 }
 
-export const scrapeUrl = onCall(
-	{ maxInstances: 10, secrets: [openaiApiKey], cors: true },
-	async (request) => {
-		if (!request.auth) {
-			throw new HttpsError('unauthenticated', 'Must be logged in');
-		}
+interface ScrapeResult {
+	name: string | null;
+	description: string | null;
+	images: string[];
+	price: string | null;
+	currency: string | null;
+	notes: string | null;
+	siteName: string | null;
+}
 
-		const { url } = request.data;
-		if (!url || typeof url !== 'string') {
-			throw new HttpsError('invalid-argument', 'URL is required');
-		}
+async function scrapeAndEnrich(url: string, aiApiKey: string): Promise<ScrapeResult> {
+	let ogTitle = '';
+	let ogDescription = '';
+	let ogImage = '';
+	let ogPrice = '';
+	let ogCurrency = '';
+	let ogSiteName = '';
+	let allImages: string[] = [];
 
+	const { result, html } = await ogs({
+		url,
+		timeout: 8,
+		fetchOptions: {
+			headers: {
+				'User-Agent': 'Mozilla/5.0 (compatible; Wishy/1.0)',
+				'Accept-Language': 'da,en',
+			},
+		},
+	}) as { result: Record<string, any>; html: string };
+
+	ogTitle = result.ogTitle || result.dcTitle || '';
+	ogDescription = result.ogDescription || result.dcDescription || '';
+	ogImage = result.ogImage?.[0]?.url || '';
+	ogSiteName = result.ogSiteName || '';
+
+	if (html) {
+		ogPrice = getMetaContent(html, 'product:price:amount')
+			|| getMetaContent(html, 'og:price:amount')
+			|| '';
+		ogCurrency = getMetaContent(html, 'product:price:currency')
+			|| getMetaContent(html, 'og:price:currency')
+			|| '';
+		allImages = extractAllImages(html, url);
+	}
+
+	if (ogImage && !allImages.includes(ogImage)) {
+		allImages.unshift(ogImage);
+	}
+	allImages = allImages.slice(0, 10);
+
+	let cleanedName = ogTitle;
+	let extractedPrice = ogPrice;
+	let extractedCurrency = ogCurrency;
+	let extractedNotes = '';
+	let rankedImages = allImages;
+
+	if (ogTitle || ogDescription) {
 		try {
-			new URL(url);
-		} catch {
-			throw new HttpsError('invalid-argument', 'Invalid URL');
-		}
+			const openai = new OpenAI({ apiKey: aiApiKey });
 
-		let ogTitle = '';
-		let ogDescription = '';
-		let ogImage = '';
-		let ogPrice = '';
-		let ogCurrency = '';
-		let ogSiteName = '';
-		let allImages: string[] = [];
-
-		try {
-			const { result, html } = await ogs({
-				url,
-				timeout: 8,
-				fetchOptions: {
-					headers: {
-						'User-Agent': 'Mozilla/5.0 (compatible; Wishy/1.0)',
-						'Accept-Language': 'da,en',
-					},
-				},
-			}) as { result: Record<string, any>; html: string };
-
-			ogTitle = result.ogTitle || result.dcTitle || '';
-			ogDescription = result.ogDescription || result.dcDescription || '';
-			ogImage = result.ogImage?.[0]?.url || '';
-			ogSiteName = result.ogSiteName || '';
-
-			if (html) {
-				ogPrice = getMetaContent(html, 'product:price:amount')
-					|| getMetaContent(html, 'og:price:amount')
-					|| '';
-				ogCurrency = getMetaContent(html, 'product:price:currency')
-					|| getMetaContent(html, 'og:price:currency')
-					|| '';
-				allImages = extractAllImages(html, url);
-			}
-		} catch {
-			throw new HttpsError('internal', 'Failed to scrape URL');
-		}
-
-		if (ogImage && !allImages.includes(ogImage)) {
-			allImages.unshift(ogImage);
-		}
-		allImages = allImages.slice(0, 10);
-
-		let cleanedName = ogTitle;
-		let extractedPrice = ogPrice;
-		let extractedCurrency = ogCurrency;
-		let extractedNotes = '';
-		let rankedImages = allImages;
-
-		if (ogTitle || ogDescription) {
-			try {
-				const openai = new OpenAI({ apiKey: openaiApiKey.value() });
-
-				const prompt = `You are a product data extractor. Given a scraped webpage's title, description, and image URLs, extract structured product info.
+			const prompt = `You are a product data extractor. Given a scraped webpage's title, description, and image URLs, extract structured product info.
 
 Title: ${ogTitle}
 Site: ${ogSiteName}
@@ -431,58 +420,83 @@ Return JSON only, no markdown:
   "imageRanking": [array of image numbers, best product image first. Only include numbers that look like actual product photos based on URL patterns]
 }`;
 
-				const completion = await openai.chat.completions.create({
-					model: 'gpt-4o-mini',
-					messages: [{ role: 'user', content: prompt }],
-					temperature: 0.1,
-					max_tokens: 300,
-				});
+			const completion = await openai.chat.completions.create({
+				model: 'gpt-4o-mini',
+				messages: [{ role: 'user', content: prompt }],
+				temperature: 0.1,
+				max_tokens: 300,
+			});
 
-				const text = completion.choices[0]?.message?.content?.trim() || '';
-				const jsonMatch = text.match(/\{[\s\S]*\}/);
-				if (jsonMatch) {
-					const parsed = JSON.parse(jsonMatch[0]);
-					if (parsed.name) cleanedName = parsed.name;
-					if (parsed.price != null && parsed.price !== 0 && !extractedPrice) {
-						extractedPrice = String(parsed.price);
-					}
-					if (parsed.currency && !extractedCurrency) {
-						extractedCurrency = parsed.currency;
-					}
-					if (parsed.notes) extractedNotes = parsed.notes;
-					if (parsed.imageRanking?.length) {
-						const reordered: string[] = [];
-						for (const idx of parsed.imageRanking) {
-							const i = Number(idx) - 1;
-							if (i >= 0 && i < allImages.length) {
-								reordered.push(allImages[i]);
-							}
-						}
-						for (const img of allImages) {
-							if (!reordered.includes(img)) reordered.push(img);
-						}
-						rankedImages = reordered;
-					}
+			const text = completion.choices[0]?.message?.content?.trim() || '';
+			const jsonMatch = text.match(/\{[\s\S]*\}/);
+			if (jsonMatch) {
+				const parsed = JSON.parse(jsonMatch[0]);
+				if (parsed.name) cleanedName = parsed.name;
+				if (parsed.price != null && parsed.price !== 0 && !extractedPrice) {
+					extractedPrice = String(parsed.price);
 				}
-			} catch (e) {
-				// AI failed — return raw scraped data
+				if (parsed.currency && !extractedCurrency) {
+					extractedCurrency = parsed.currency;
+				}
+				if (parsed.notes) extractedNotes = parsed.notes;
+				if (parsed.imageRanking?.length) {
+					const reordered: string[] = [];
+					for (const idx of parsed.imageRanking) {
+						const i = Number(idx) - 1;
+						if (i >= 0 && i < allImages.length) {
+							reordered.push(allImages[i]);
+						}
+					}
+					for (const img of allImages) {
+						if (!reordered.includes(img)) reordered.push(img);
+					}
+					rankedImages = reordered;
+				}
 			}
+		} catch (e) {
+			// AI failed — return raw scraped data
+		}
+	}
+
+	return {
+		name: cleanedName || null,
+		description: ogDescription || null,
+		images: rankedImages,
+		price: extractedPrice || null,
+		currency: extractedCurrency || null,
+		notes: extractedNotes || null,
+		siteName: ogSiteName || null,
+	};
+}
+
+export const scrapeUrl = onCall(
+	{ maxInstances: 10, secrets: [openaiApiKey], cors: true },
+	async (request) => {
+		if (!request.auth) {
+			throw new HttpsError('unauthenticated', 'Must be logged in');
 		}
 
-		return {
-			name: cleanedName || null,
-			description: ogDescription || null,
-			images: rankedImages,
-			price: extractedPrice || null,
-			currency: extractedCurrency || null,
-			notes: extractedNotes || null,
-			siteName: ogSiteName || null,
-		};
+		const { url } = request.data;
+		if (!url || typeof url !== 'string') {
+			throw new HttpsError('invalid-argument', 'URL is required');
+		}
+
+		try {
+			new URL(url);
+		} catch {
+			throw new HttpsError('invalid-argument', 'Invalid URL');
+		}
+
+		try {
+			return await scrapeAndEnrich(url, openaiApiKey.value());
+		} catch {
+			throw new HttpsError('internal', 'Failed to scrape URL');
+		}
 	}
 );
 
 export const addItem = onRequest(
-	{ maxInstances: 10, cors: true },
+	{ maxInstances: 10, secrets: [openaiApiKey], cors: true },
 	async (req, res) => {
 		if (req.method !== 'POST') {
 			res.status(405).json({ error: 'Method not allowed' });
@@ -527,17 +541,28 @@ export const addItem = onRequest(
 
 		const wishlistId = wishlistsSnap.docs[0].id;
 
+		let scraped: ScrapeResult | null = null;
+		if (url && !name) {
+			try {
+				scraped = await scrapeAndEnrich(url, openaiApiKey.value());
+			} catch {
+				// Scraping failed — fall back to raw URL data
+			}
+		}
+
 		const itemsSnap = await admin.firestore()
 			.collection(`users/${userId}/wishlists/${wishlistId}/items`)
 			.get();
 
 		const itemData = {
-			name: name || url,
+			name: name || scraped?.name || url,
 			url: url || null,
-			price: typeof price === 'number' ? price : null,
-			currency: currency || null,
-			imageUrl: imageUrl || null,
-			notes: notes || null,
+			price: typeof price === 'number' ? price
+				: scraped?.price ? parseFloat(scraped.price) || null
+				: null,
+			currency: currency || scraped?.currency || null,
+			imageUrl: imageUrl || scraped?.images?.[0] || null,
+			notes: notes || scraped?.notes || null,
 			favorite: false,
 			order: itemsSnap.size,
 			createdAt: admin.firestore.FieldValue.serverTimestamp(),
