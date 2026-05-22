@@ -43,6 +43,6 @@ jobs:
 
       - uses: w9jds/firebase-action@master
         with:
-          args: deploy --only functions,firestore,storage --project wishy-famille
+          args: deploy --only functions,firestore --project wishy-famille
         env:
           GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
