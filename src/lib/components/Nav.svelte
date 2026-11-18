@@ -29,12 +29,15 @@
 			</span>
 		</a>
 		<div class="flex items-center gap-2">
-			<a href="/about" class="text-sm font-semibold text-text-soft hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-primary-light/20">
+			<a href="/about" class="{$isLoggedIn ? 'hidden sm:inline-block' : ''} text-sm font-semibold text-text-soft hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-primary-light/20">
 				{$t('nav.about')}
 			</a>
 			{#if $isLoggedIn}
 				<a href={$userProfile?.username ? `/lists/${$userProfile.username}` : '/my-list'} class="text-sm font-semibold text-text-soft hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-primary-light/20">
 					{$t('nav.myList')}
+				</a>
+				<a href="/friends" class="text-sm font-semibold text-text-soft hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-primary-light/20">
+					{$t('nav.friends')}
 				</a>
 
 				<div class="relative profile-menu">
@@ -67,6 +70,13 @@
 									Admin
 								</a>
 							{/if}
+							<a
+								href="/about"
+								onclick={() => (menuOpen = false)}
+								class="sm:hidden block px-3 py-2 text-sm text-text-soft hover:text-primary hover:bg-primary-light/10 transition-colors"
+							>
+								{$t('nav.about')}
+							</a>
 							<a
 								href="/settings"
 								onclick={() => (menuOpen = false)}

@@ -1,69 +1,108 @@
 <script lang="ts">
-	import { collection, getDocs } from 'firebase/firestore';
-	import { db } from '$lib/firebase';
-	import { isLoggedIn, userProfile } from '$lib/stores/auth';
+	import { goto } from '$app/navigation';
+	import { isLoading, isLoggedIn } from '$lib/stores/auth';
 	import { t } from '$lib/i18n';
-	import type { PublicProfile } from '$lib/types';
 
-	let profiles = $state<(PublicProfile & { username: string })[]>([]);
-	let loading = $state(true);
-
+	// Logged-in users land on their own list (with friends panel);
+	// /my-list handles profile setup if no username exists yet.
 	$effect(() => {
-		(async () => {
-			const snap = await getDocs(collection(db, 'usernames'));
-			profiles = snap.docs.map((d) => ({
-				username: d.id,
-				...d.data()
-			})) as (PublicProfile & { username: string })[];
-			loading = false;
-		})();
+		if (!$isLoading && $isLoggedIn) {
+			goto('/my-list', { replaceState: true });
+		}
 	});
+
+	const features = [
+		{ icon: '💰', key: 'affiliate' },
+		{ icon: '🚫', key: 'ads' },
+		{ icon: '🎯', key: 'algorithms' },
+		{ icon: '🤫', key: 'spoilers' },
+		{ icon: '✨', key: 'autofill' },
+		{ icon: '👯', key: 'friends' }
+	];
+
+	const steps = ['landing.step1', 'landing.step2', 'landing.step3'];
 </script>
 
-<div class="space-y-6">
-	<div class="text-center">
-		<h1 class="text-2xl font-extrabold text-text">{$t('home.title')}</h1>
-		<p class="text-text-soft mt-1">{$t('home.subtitle')}</p>
+{#if $isLoading || $isLoggedIn}
+	<div class="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+		<span class="text-5xl animate-float">🎁</span>
+		<div class="flex gap-1.5">
+			<span class="w-2.5 h-2.5 bg-primary rounded-full animate-bounce" style="animation-delay: 0s"></span>
+			<span class="w-2.5 h-2.5 bg-secondary rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
+			<span class="w-2.5 h-2.5 bg-accent rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
+		</div>
 	</div>
-
-	{#if loading}
-		<div class="flex flex-col items-center py-12 gap-3">
-			<span class="text-4xl animate-float">🎁</span>
-			<div class="flex gap-1.5">
-				<span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0s"></span>
-				<span class="w-2 h-2 bg-secondary rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
-				<span class="w-2 h-2 bg-accent rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
-			</div>
-		</div>
-	{:else if profiles.length === 0}
-		<div class="text-center py-12">
-			<span class="text-5xl block mb-3">🌟</span>
-			<p class="text-text-soft font-semibold">{$t('home.noUsers')}</p>
-		</div>
-	{:else}
-		<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-			{#each profiles as profile (profile.username)}
+{:else}
+	<div class="space-y-12 py-4">
+		<!-- Hero -->
+		<section class="text-center space-y-5">
+			<span class="text-6xl block animate-float">🎁</span>
+			<p class="inline-block text-xs font-bold text-secondary-dark bg-secondary/10 border-2 border-secondary/20 rounded-full px-3 py-1">
+				{$t('landing.badge')}
+			</p>
+			<h1 class="text-3xl sm:text-4xl font-extrabold text-text leading-tight max-w-xl mx-auto">
+				{$t('landing.title')}
+			</h1>
+			<p class="text-text-soft text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
+				{$t('landing.subtitle')}
+			</p>
+			<div class="flex flex-col items-center gap-2 pt-2">
 				<a
-					href="/lists/{profile.username}"
-					class="group flex flex-col items-center gap-3 bg-card rounded-2xl border-2 border-primary-light/30 p-5 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 hover:-translate-y-0.5 transition-all duration-200"
+					href="/login"
+					class="inline-block font-bold bg-gradient-to-r from-primary to-secondary text-white px-8 py-3.5 rounded-full text-base hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
 				>
-					{#if profile.photoUrl}
-						<img
-							src={profile.photoUrl}
-							alt={profile.displayName || profile.username}
-							class="w-16 h-16 rounded-full object-cover border-2 border-primary-light/40 group-hover:border-primary/50 transition-colors"
-						/>
-					{:else}
-						<div class="w-16 h-16 rounded-full bg-gradient-to-br from-primary-light to-secondary-light flex items-center justify-center text-2xl border-2 border-primary-light/40">
-							{(profile.displayName || profile.username).charAt(0).toUpperCase()}
-						</div>
-					{/if}
-					<div class="text-center min-w-0 w-full">
-						<p class="font-bold text-text text-sm truncate">{profile.displayName || profile.username}</p>
-						<p class="text-xs text-text-muted">@{profile.username}</p>
-					</div>
+					✨ {$t('landing.cta')}
 				</a>
-			{/each}
-		</div>
-	{/if}
-</div>
+				<p class="text-xs text-text-muted">{$t('landing.ctaHint')}</p>
+			</div>
+		</section>
+
+		<!-- Value propositions -->
+		<section class="space-y-4">
+			<h2 class="text-xl font-extrabold text-text text-center">{$t('landing.valuesTitle')}</h2>
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+				{#each features as feature (feature.key)}
+					<div class="bg-card rounded-2xl border-2 border-primary-light/30 p-5 shadow-sm">
+						<h3 class="font-bold text-text flex items-center gap-2">
+							<span class="text-xl">{feature.icon}</span>
+							{$t(`landing.feature.${feature.key}.title`)}
+						</h3>
+						<p class="text-text-soft mt-1.5 text-sm leading-relaxed">{$t(`landing.feature.${feature.key}.body`)}</p>
+					</div>
+				{/each}
+			</div>
+			<p class="text-center">
+				<a href="/about" class="text-sm font-bold text-secondary hover:text-secondary-dark transition-colors">
+					{$t('landing.learnMore')} →
+				</a>
+			</p>
+		</section>
+
+		<!-- How it works -->
+		<section class="space-y-4">
+			<h2 class="text-xl font-extrabold text-text text-center">{$t('landing.howTitle')}</h2>
+			<ol class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+				{#each steps as step, i (step)}
+					<li class="flex sm:flex-col items-center sm:text-center gap-3 bg-card rounded-2xl border-2 border-primary-light/30 p-4 shadow-sm">
+						<span class="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-primary to-secondary text-white font-extrabold flex items-center justify-center">
+							{i + 1}
+						</span>
+						<p class="text-sm font-semibold text-text">{$t(step)}</p>
+					</li>
+				{/each}
+			</ol>
+		</section>
+
+		<!-- Final CTA -->
+		<section class="bg-gradient-to-br from-primary-light/20 to-secondary-light/20 rounded-2xl border-2 border-primary/30 p-6 shadow-sm text-center">
+			<h2 class="text-lg font-bold text-text">{$t('landing.finalTitle')}</h2>
+			<p class="text-text-soft mt-1 text-sm">{$t('landing.finalBody')}</p>
+			<a
+				href="/login"
+				class="inline-block mt-4 font-bold bg-gradient-to-r from-primary to-secondary text-white px-6 py-2.5 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+			>
+				✨ {$t('landing.cta')}
+			</a>
+		</section>
+	</div>
+{/if}

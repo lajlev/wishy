@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { db } from '$lib/firebase';
+	import { page } from '$app/state';
 	import {
 		user, userProfile, hasUsername, checkUsernameAvailable, claimUsername, uploadPhoto
 	} from '$lib/stores/auth';
@@ -20,7 +20,12 @@
 	$effect(() => {
 		const profile = $userProfile;
 		if (profile?.username) {
-			goto(`/lists/${profile.username}`, { replaceState: true });
+			// Return to where the user came from (e.g. a friend's list) once the profile exists
+			const redirect = page.url.searchParams.get('redirect');
+			const target = redirect && redirect.startsWith('/') && !redirect.startsWith('//')
+				? redirect
+				: `/lists/${profile.username}`;
+			goto(target, { replaceState: true });
 		}
 	});
 

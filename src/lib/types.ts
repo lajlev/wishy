@@ -18,6 +18,14 @@ export interface PublicProfile {
 	photoUrl?: string;
 }
 
+/** users/{uid}/friends/{friendUid} — always mirrored on both sides */
+export interface Friend {
+	username: string;
+	displayName: string;
+	photoUrl: string | null;
+	since: Timestamp;
+}
+
 export interface Wishlist {
 	id: string;
 	title: string;

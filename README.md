@@ -20,7 +20,10 @@ Existing wishlist platforms replace links with affiliate URLs, suggest products 
 - Create and manage wishlists with drag-and-drop ordering
 - Paste a product URL to auto-fill name, image, price, and notes
 - Mark items as favorites
-- Share your list via a public `/lists/{username}` link
+- Share your list via a public `/lists/{username}` link — copy it, use the native share sheet, or let Wishy email it to someone (rate-limited)
+- Landing page for new visitors; logged-in users go straight to their own list
+- Mutual friends: add the owner of any list as a friend in one click (both sides become friends instantly) and find friends' lists from your own list or `/friends`
+- Logged-out visitors on a list are invited to sign in and become friends; they return to the list and the friendship completes automatically
 - Visitors can reserve gifts via email confirmation (token-based)
 - Unreserve only via email link (no spoilers)
 - Confirmation gate so list owners don't accidentally see reservations
@@ -39,7 +42,8 @@ src/
     firebase.ts    Firebase client init
     types.ts       TypeScript interfaces
   routes/
-    +page.svelte            Home — list of all wishlists
+    +page.svelte            Landing page (logged out) / redirect to own list (logged in)
+    friends/                Friends list (mutual) + share your list
     login/                  Passwordless login flow
     my-list/                Owner's wishlist dashboard
     lists/[username]/       Public shared wishlist view
@@ -49,7 +53,7 @@ src/
     about/                  About page
     admin/                  Admin panel
 functions/
-  src/index.ts              Cloud Functions (login email, scraping, reservations, notifications)
+  src/index.ts              Cloud Functions (login email, scraping, reservations, friends, list invites, notifications)
 firestore.rules             Security rules
 firestore.indexes.json      Composite indexes
 ```

@@ -10,13 +10,19 @@
 	import { t } from '$lib/i18n';
 	import { locale } from '$lib/i18n';
 	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import WishItem from '$lib/components/WishItem.svelte';
 	import WishForm from '$lib/components/WishForm.svelte';
 	import ReserveModal from '$lib/components/ReserveModal.svelte';
+	import FriendsPanel from '$lib/components/FriendsPanel.svelte';
+	import FriendAvatar from '$lib/components/FriendAvatar.svelte';
+	import ShareListPanel from '$lib/components/ShareListPanel.svelte';
+	import { addFriend } from '$lib/friends';
 	import type { Wishlist, WishItem as WishItemType, Reservation } from '$lib/types';
 
 	let wishlist = $state<Wishlist | null>(null);
 	let ownerName = $state('');
+	let ownerPhoto = $state<string | null>(null);
 	let ownerId = $state<string | null>(null);
 	let items = $state<WishItemType[]>([]);
 	let reservations = $state<Record<string, Reservation>>({});
@@ -32,8 +38,15 @@
 	let reservingItem = $state<WishItemType | null>(null);
 	let editingItem = $state<WishItemType | null>(null);
 	let addFormKey = $state(0);
-	let copied = $state(false);
+	let showShare = $state(false);
 	let toast = $state('');
+
+	// Friendship state between the logged-in visitor and the list owner
+	let friendStatus = $state<'unknown' | 'friends' | 'none'>('unknown');
+	let addingFriend = $state(false);
+	let autoBefriendHandled = false;
+	const invited = $derived(page.url.searchParams.get('invite') === '1');
+	const needsProfile = $derived(!!$userProfile && !$userProfile.username);
 	let exchangeRates = $state<Record<string, number> | null>(null);
 
 	const sortedItems = $derived(
@@ -89,6 +102,7 @@
 
 			const userId = usernameDoc.data().userId;
 			ownerId = userId;
+			ownerPhoto = usernameDoc.data().photoUrl || null;
 
 			const q = query(
 				collection(db, 'users', userId, 'wishlists'),
@@ -164,6 +178,47 @@
 
 		return () => unsub();
 	});
+
+	$effect(() => {
+		const me = $user;
+		const oid = ownerId;
+		if (!me || !oid || me.uid === oid) {
+			friendStatus = 'unknown';
+			return;
+		}
+		return onSnapshot(
+			doc(db, 'users', me.uid, 'friends', oid),
+			(snap) => (friendStatus = snap.exists() ? 'friends' : 'none'),
+			() => (friendStatus = 'none')
+		);
+	});
+
+	// Coming back from login with ?befriend=1 completes the friend request automatically
+	$effect(() => {
+		if (autoBefriendHandled || page.url.searchParams.get('befriend') !== '1') return;
+		if (friendStatus === 'unknown' || !$userProfile?.username) return;
+		autoBefriendHandled = true;
+
+		const url = new URL(page.url);
+		url.searchParams.delete('befriend');
+		replaceState(url, page.state);
+
+		if (friendStatus === 'none') handleAddFriend();
+	});
+
+	async function handleAddFriend() {
+		if (!username || addingFriend) return;
+		addingFriend = true;
+		try {
+			await addFriend(username);
+			showToast($t('friends.added', { name: ownerName }));
+		} catch {
+			showToast($t('common.error'));
+		}
+		addingFriend = false;
+	}
+
+	const befriendRedirect = $derived(`/lists/${username}?befriend=1`);
 
 	function handleConfirmNotOwner() {
 		confirmedNotOwner = true;
@@ -257,13 +312,6 @@
 		if (!wishlist || !ownerId || !confirm($t('item.deleteConfirm'))) return;
 		await deleteDoc(doc(db, 'users', ownerId, 'wishlists', wishlist.id, 'items', itemId));
 	}
-
-	async function copyShareLink() {
-		const url = `${window.location.origin}/lists/${username}`;
-		await navigator.clipboard.writeText(url);
-		copied = true;
-		setTimeout(() => (copied = false), 2000);
-	}
 </script>
 
 {#if loading}
@@ -283,7 +331,14 @@
 {:else if needsConfirmation}
 	<div class="max-w-md mx-auto py-12">
 		<div class="bg-card rounded-2xl border-2 border-primary-light/30 p-6 shadow-lg shadow-primary/5 text-center space-y-5">
-			<span class="text-5xl block">🎁</span>
+			{#if invited}
+				<div class="flex flex-col items-center gap-2">
+					<FriendAvatar name={ownerName} photoUrl={ownerPhoto} size="lg" />
+					<p class="text-sm font-bold text-secondary-dark">{$t('invite.banner', { name: ownerName })}</p>
+				</div>
+			{:else}
+				<span class="text-5xl block">🎁</span>
+			{/if}
 			<h1 class="text-xl font-extrabold text-text">
 				{$t('shared.confirmNotOwner', { name: ownerName })}
 			</h1>
@@ -312,19 +367,86 @@
 			<div class="flex items-center justify-between">
 				<h1 class="text-2xl font-extrabold text-text">{$t('dashboard.myWishlist')}</h1>
 				<button
-					onclick={copyShareLink}
-					class="flex-shrink-0 text-sm font-bold px-4 py-2 rounded-full border-2 transition-all active:scale-95 {copied ? 'border-success/50 text-success bg-success/10' : 'border-secondary/30 text-secondary hover:border-secondary hover:bg-secondary/10'}"
+					onclick={() => (showShare = !showShare)}
+					class="flex-shrink-0 text-sm font-bold px-4 py-2 rounded-full border-2 transition-all active:scale-95 {showShare ? 'border-secondary text-white bg-secondary' : 'border-secondary/30 text-secondary hover:border-secondary hover:bg-secondary/10'}"
 				>
-					{copied ? '✅ ' : '🔗 '}{copied ? $t('wishlist.copied') : $t('wishlist.share')}
+					💌 {$t('wishlist.share')}
 				</button>
 			</div>
+
+			{#if showShare}
+				<ShareListPanel username={username ?? ""} displayName={ownerName} onclose={() => (showShare = false)} />
+			{/if}
+
+			{#if ownerId}
+				<FriendsPanel uid={ownerId} onshare={() => (showShare = true)} />
+			{/if}
 		{:else}
-			<div>
-				<h1 class="text-2xl font-extrabold text-text">
-					{$t('shared.title', { name: ownerName })}
-				</h1>
-				{#if wishlist.description}
-					<p class="text-text-muted mt-1">{wishlist.description}</p>
+			<div class="space-y-4">
+				{#if invited}
+					<p class="inline-flex items-center gap-2 text-xs font-bold text-secondary-dark bg-secondary/10 border-2 border-secondary/20 rounded-full px-3 py-1">
+						{$t('invite.banner', { name: ownerName })}
+					</p>
+				{/if}
+
+				<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+					<div class="flex items-center gap-3 min-w-0">
+						<FriendAvatar name={ownerName} photoUrl={ownerPhoto} />
+						<div class="min-w-0">
+							<h1 class="text-2xl font-extrabold text-text">
+								{$t('shared.title', { name: ownerName })}
+							</h1>
+							{#if wishlist.description}
+								<p class="text-text-muted mt-1">{wishlist.description}</p>
+							{/if}
+						</div>
+					</div>
+
+					{#if $isLoggedIn && $userProfile?.username}
+						{#if friendStatus === 'friends'}
+							<span class="self-start flex-shrink-0 text-xs font-bold px-3 py-1.5 rounded-full border-2 border-success/30 text-success bg-success/10">
+								✓ {$t('friends.isFriend')}
+							</span>
+						{:else if friendStatus === 'none'}
+							<button
+								onclick={handleAddFriend}
+								disabled={addingFriend}
+								class="self-start flex-shrink-0 font-bold bg-gradient-to-r from-primary to-secondary text-white px-4 py-2 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 disabled:opacity-50 transition-all active:scale-95"
+							>
+								{addingFriend ? $t('friends.adding') : `👋 ${$t('friends.add', { name: ownerName })}`}
+							</button>
+						{/if}
+					{/if}
+				</div>
+
+				{#if !$isLoggedIn}
+					<div class="bg-gradient-to-br from-primary-light/20 to-secondary-light/20 rounded-2xl border-2 border-primary/30 p-5 shadow-sm flex flex-col sm:flex-row sm:items-center gap-4">
+						<div class="flex-1">
+							<h2 class="font-bold text-text flex items-center gap-2">
+								<span class="text-xl">👯</span>
+								{$t('friends.loginTitle', { name: ownerName })}
+							</h2>
+							<p class="text-sm text-text-soft mt-1 leading-relaxed">{$t('friends.loginBody', { name: ownerName })}</p>
+						</div>
+						<a
+							href="/login?redirect={encodeURIComponent(befriendRedirect)}"
+							class="flex-shrink-0 text-center font-bold bg-gradient-to-r from-primary to-secondary text-white px-5 py-2.5 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+						>
+							✨ {$t('friends.loginCta')}
+						</a>
+					</div>
+				{:else if needsProfile}
+					<div class="bg-card rounded-2xl border-2 border-secondary/30 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+						<p class="flex-1 text-sm text-text-soft">{$t('friends.needsProfile', { name: ownerName })}</p>
+						<a
+							href="/my-list?redirect={encodeURIComponent(befriendRedirect)}"
+							class="flex-shrink-0 text-center font-bold bg-gradient-to-r from-primary to-secondary text-white px-4 py-2 rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-95"
+						>
+							{$t('friends.needsProfileCta')}
+						</a>
+					</div>
+				{:else if friendStatus === 'none'}
+					<p class="text-xs text-text-muted">{$t('friends.addHint', { name: ownerName })}</p>
 				{/if}
 			</div>
 		{/if}

@@ -16,6 +16,13 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow update: if isAdmin();
 
+      // Mutual friendships. Only the owner can read their friends list;
+      // both sides are written by the addFriend/removeFriend Cloud Functions.
+      match /friends/{friendId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
       match /wishlists/{wishlistId} {
         allow create: if request.auth != null
           && request.auth.uid == userId;
@@ -46,7 +53,10 @@ service cloud.firestore {
     }
 
     match /usernames/{username} {
-      allow read: if true;
+      // Single lookups only (public list pages, availability check).
+      // Listing the whole directory is reserved for admins.
+      allow get: if true;
+      allow list: if isAdmin();
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid;
       allow update: if request.auth != null

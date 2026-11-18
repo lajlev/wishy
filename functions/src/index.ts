@@ -255,6 +255,12 @@ export const adminDeleteUser = onCall(
 			for (const res of reservationsSnap.docs) batch.delete(res.ref);
 			batch.delete(doc.ref);
 		}
+		// Remove friendships on both sides
+		const friendsSnap = await admin.firestore().collection(`users/${uid}/friends`).get();
+		for (const friend of friendsSnap.docs) {
+			batch.delete(friend.ref);
+			batch.delete(admin.firestore().doc(`users/${friend.id}/friends/${uid}`));
+		}
 		batch.delete(admin.firestore().doc(`users/${uid}`));
 		await batch.commit();
 
@@ -984,3 +990,235 @@ export const updateExchangeRates = onSchedule('every monday 06:00', async () => 
 		updatedAt: admin.firestore.FieldValue.serverTimestamp(),
 	});
 });
+
+// ── Friends (mutual, automatic) ─────────────────────────────────────
+
+const ALLOWED_BASE_URLS = ['https://wish.lajlev.dk'];
+const DEFAULT_BASE_URL = ALLOWED_BASE_URLS[0];
+
+/** Only allow links in outgoing emails to point at known Wishy origins. */
+function safeBaseUrl(baseUrl: unknown): string {
+	if (typeof baseUrl !== 'string') return DEFAULT_BASE_URL;
+	try {
+		const u = new URL(baseUrl);
+		if (ALLOWED_BASE_URLS.includes(u.origin)) return u.origin;
+		if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return u.origin;
+		if (u.protocol === 'https:' && /^[a-z0-9-]+(--[a-z0-9-]+)?\.(web\.app|firebaseapp\.com)$/i.test(u.hostname)) return u.origin;
+	} catch {
+		// fall through
+	}
+	return DEFAULT_BASE_URL;
+}
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+const EMAIL_PATTERN = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]{2,}$/;
+
+interface PublicUserInfo {
+	uid: string;
+	username: string;
+	displayName: string;
+	photoUrl: string | null;
+}
+
+async function getPublicUserInfo(uid: string): Promise<PublicUserInfo | null> {
+	const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+	if (!userDoc.exists) return null;
+	const d = userDoc.data()!;
+	if (!d.username || d.banned) return null;
+	return {
+		uid,
+		username: d.username,
+		displayName: d.displayName || d.username,
+		photoUrl: d.photoUrl || null,
+	};
+}
+
+export const addFriend = onCall(
+	{ maxInstances: 10, cors: true },
+	async (request) => {
+		if (!request.auth) throw new HttpsError('unauthenticated', 'Must be logged in');
+
+		const { username } = request.data;
+		if (!username || typeof username !== 'string' || username.includes('/')) {
+			throw new HttpsError('invalid-argument', 'Username is required');
+		}
+
+		const usernameDoc = await admin.firestore().doc(`usernames/${username.toLowerCase().trim()}`).get();
+		if (!usernameDoc.exists) throw new HttpsError('not-found', 'User not found');
+		const friendUid = usernameDoc.data()!.userId as string;
+
+		const myUid = request.auth.uid;
+		if (friendUid === myUid) {
+			throw new HttpsError('invalid-argument', 'Cannot befriend yourself');
+		}
+
+		const [me, friend] = await Promise.all([getPublicUserInfo(myUid), getPublicUserInfo(friendUid)]);
+		if (!me) throw new HttpsError('failed-precondition', 'Set up your profile first');
+		if (!friend) throw new HttpsError('not-found', 'User not found');
+
+		const myRef = admin.firestore().doc(`users/${myUid}/friends/${friendUid}`);
+		const theirRef = admin.firestore().doc(`users/${friendUid}/friends/${myUid}`);
+		const existing = await myRef.get();
+		const since = existing.exists && existing.data()?.since
+			? existing.data()!.since
+			: admin.firestore.FieldValue.serverTimestamp();
+
+		// Both sides are written atomically — friendships are always mutual
+		const batch = admin.firestore().batch();
+		batch.set(myRef, {
+			username: friend.username,
+			displayName: friend.displayName,
+			photoUrl: friend.photoUrl,
+			since,
+		});
+		batch.set(theirRef, {
+			username: me.username,
+			displayName: me.displayName,
+			photoUrl: me.photoUrl,
+			since,
+		});
+		await batch.commit();
+
+		return { success: true, friendUid, alreadyFriends: existing.exists };
+	}
+);
+
+export const removeFriend = onCall(
+	{ maxInstances: 10, cors: true },
+	async (request) => {
+		if (!request.auth) throw new HttpsError('unauthenticated', 'Must be logged in');
+
+		const { friendUid } = request.data;
+		if (!friendUid || typeof friendUid !== 'string' || friendUid.includes('/')) {
+			throw new HttpsError('invalid-argument', 'Friend ID is required');
+		}
+
+		const myUid = request.auth.uid;
+		const batch = admin.firestore().batch();
+		batch.delete(admin.firestore().doc(`users/${myUid}/friends/${friendUid}`));
+		batch.delete(admin.firestore().doc(`users/${friendUid}/friends/${myUid}`));
+		await batch.commit();
+
+		return { success: true };
+	}
+);
+
+// ── Share list via email ─────────────────────────────────────────────
+
+const INVITE_LIMIT_PER_HOUR = 10;
+const INVITE_LIMIT_PER_DAY = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+const inviteStrings: Record<string, Record<string, string>> = {
+	da: {
+		subject: '{name} har delt sin ønskeliste med dig 🎁',
+		heading: '{name} vil gerne vise dig sin ønskeliste',
+		body: 'Se hvad {name} ønsker sig, og reserver en gave uden at ødelægge overraskelsen. Log ind og bliv venner, så du altid kan finde listen igen.',
+		button: '🎁 Se ønskelisten',
+		footer: 'Wishy er en simpel ønskeliste uden reklamer, affiliate-links eller algoritmer.',
+		ignore: 'Du får denne email, fordi {name} har delt sin ønskeliste med dig på Wishy.',
+		tagline: 'Din families ønskeliste',
+	},
+	en: {
+		subject: '{name} shared their wishlist with you 🎁',
+		heading: '{name} wants to show you their wishlist',
+		body: 'See what {name} is wishing for and reserve a gift without spoiling the surprise. Sign in and become friends so you can always find the list again.',
+		button: '🎁 See the wishlist',
+		footer: 'Wishy is a simple wishlist with no ads, affiliate links, or algorithms.',
+		ignore: 'You received this email because {name} shared their wishlist with you on Wishy.',
+		tagline: 'Your family wishlist',
+	},
+};
+
+function buildInviteEmail(listUrl: string, inviter: { displayName: string; photoUrl: string | null }, locale: string): string {
+	const s = inviteStrings[locale] || inviteStrings['da'];
+	const name = escapeHtml(inviter.displayName);
+	const avatar = inviter.photoUrl
+		? `<img src="${escapeHtml(inviter.photoUrl)}" alt="${name}" style="width:72px;height:72px;object-fit:cover;border-radius:50%;border:2px solid rgba(249,168,196,0.4);margin-bottom:16px;" /><br>`
+		: '';
+	const inner = `${avatar}<h1 style="margin:0 0 12px;font-size:24px;font-weight:800;color:#2e1065;">${s.heading.split('{name}').join(name)}</h1>
+<p style="margin:0 0 28px;font-size:16px;line-height:1.6;color:#6b5a8a;">${s.body.split('{name}').join(name)}</p>
+<a href="${listUrl}" target="_blank" style="display:inline-block;background:linear-gradient(to right,#e8567f,#d63d6a);color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;padding:14px 48px;border-radius:50px;box-shadow:0 4px 16px rgba(232,86,127,0.25);">
+	${s.button}
+</a>
+<p style="margin:28px 0 0;font-size:13px;line-height:1.5;color:#9b8ab8;">${s.footer}<br>${s.ignore.split('{name}').join(name)}</p>`;
+	return emailShell(locale, s.tagline, inner);
+}
+
+export const sendListInvite = onCall(
+	{ maxInstances: 10, secrets: [resendApiKey, resendFrom], cors: true },
+	async (request) => {
+		if (!request.auth) throw new HttpsError('unauthenticated', 'Must be logged in');
+
+		const { email, locale, baseUrl } = request.data;
+		if (!email || typeof email !== 'string' || email.length > 254) {
+			throw new HttpsError('invalid-argument', 'Valid email is required');
+		}
+		const recipient = email.toLowerCase().trim();
+		if (!EMAIL_PATTERN.test(recipient)) {
+			throw new HttpsError('invalid-argument', 'Valid email is required');
+		}
+
+		const me = await getPublicUserInfo(request.auth.uid);
+		if (!me) throw new HttpsError('failed-precondition', 'Set up your profile first');
+
+		const senderAddress = (request.auth.token.email || '').toLowerCase();
+		if (senderAddress && senderAddress === recipient) {
+			throw new HttpsError('invalid-argument', 'Cannot invite yourself');
+		}
+
+		// Rate limiting per sender — stored server-side only (no client rules)
+		const limitRef = admin.firestore().doc(`inviteRateLimits/${request.auth.uid}`);
+		const now = Date.now();
+		await admin.firestore().runTransaction(async (tx) => {
+			const snap = await tx.get(limitRef);
+			const sent = ((snap.exists ? snap.data()!.sent : []) as { email: string; at: number }[])
+				.filter((s) => now - s.at < DAY_MS);
+
+			if (sent.some((s) => s.email === recipient)) {
+				throw new HttpsError('already-exists', 'Already invited recently');
+			}
+			if (sent.filter((s) => now - s.at < HOUR_MS).length >= INVITE_LIMIT_PER_HOUR
+				|| sent.length >= INVITE_LIMIT_PER_DAY) {
+				throw new HttpsError('resource-exhausted', 'Too many invites, try again later');
+			}
+
+			sent.push({ email: recipient, at: now });
+			tx.set(limitRef, { sent, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+		});
+
+		const lang = locale === 'en' ? 'en' : 'da';
+		const s = inviteStrings[lang];
+		const listUrl = `${safeBaseUrl(baseUrl)}/lists/${encodeURIComponent(me.username)}?invite=1`;
+
+		const resend = new Resend(resendApiKey.value());
+		const { error } = await resend.emails.send({
+			from: `Wishy 🎁 <${resendFrom.value()}>`,
+			to: recipient,
+			replyTo: senderAddress || undefined,
+			subject: s.subject.replace('{name}', me.displayName),
+			html: buildInviteEmail(listUrl, me, lang),
+		});
+		if (error) {
+			// Free up the slot so the sender can retry this recipient
+			await admin.firestore().runTransaction(async (tx) => {
+				const snap = await tx.get(limitRef);
+				const sent = ((snap.data()?.sent || []) as { email: string; at: number }[])
+					.filter((s) => !(s.email === recipient && s.at === now));
+				tx.set(limitRef, { sent, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+			});
+			throw new HttpsError('internal', 'Failed to send email');
+		}
+
+		return { success: true };
+	}
+);
