@@ -1,6 +1,6 @@
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import * as admin from 'firebase-admin';
 import { Resend } from 'resend';
@@ -1220,5 +1220,45 @@ export const sendListInvite = onCall(
 		}
 
 		return { success: true };
+	}
+);
+
+// Keep the denormalized copy of a user's profile in their friends' lists fresh.
+// claimUsername / updateDisplayName / uploadPhoto all update users/{uid}.
+export const syncFriendProfiles = onDocumentUpdated(
+	{ document: 'users/{userId}' },
+	async (event) => {
+		const before = event.data?.before.data();
+		const after = event.data?.after.data();
+		if (!before || !after || !after.username) return;
+
+		const next = {
+			username: after.username as string,
+			displayName: (after.displayName || after.username) as string,
+			photoUrl: (after.photoUrl || null) as string | null,
+		};
+		const changed = before.username !== after.username
+			|| (before.displayName || before.username) !== next.displayName
+			|| (before.photoUrl || null) !== next.photoUrl;
+		if (!changed) return;
+
+		const uid = event.params.userId;
+		const db = admin.firestore();
+		const friendsSnap = await db.collection(`users/${uid}/friends`).get();
+		if (friendsSnap.empty) return;
+
+		// update() (not set) so a concurrently removed friendship is not recreated
+		const refs = friendsSnap.docs.map((d) => db.doc(`users/${d.id}/friends/${uid}`));
+		for (let i = 0; i < refs.length; i += 500) {
+			const chunk = refs.slice(i, i + 500);
+			const batch = db.batch();
+			for (const ref of chunk) batch.update(ref, next);
+			try {
+				await batch.commit();
+			} catch {
+				// One missing mirror doc fails the whole batch; fall back to per-doc updates
+				await Promise.all(chunk.map((ref) => ref.update(next).catch(() => undefined)));
+			}
+		}
 	}
 );
