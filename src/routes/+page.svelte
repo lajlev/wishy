@@ -9,6 +9,7 @@
 	import ShareIllustration from '$lib/components/illustrations/ShareIllustration.svelte';
 	import SecretIllustration from '$lib/components/illustrations/SecretIllustration.svelte';
 	import HeroIllustration from '$lib/components/illustrations/HeroIllustration.svelte';
+	import FeatureIcon, { type FeatureIconName } from '$lib/components/illustrations/FeatureIcon.svelte';
 
 	// Logged-in users land on their own list (with friends panel);
 	// /my-list handles profile setup if no username exists yet.
@@ -25,13 +26,13 @@
 		{ key: 'step4', art: SecretIllustration }
 	];
 
-	const features = [
-		{ icon: '💰', key: 'affiliate' },
-		{ icon: '🚫', key: 'ads' },
-		{ icon: '🎯', key: 'algorithms' },
-		{ icon: '🤫', key: 'spoilers' },
-		{ icon: '👵', key: 'guests' },
-		{ icon: '👯', key: 'friends' }
+	const features: { key: FeatureIconName }[] = [
+		{ key: 'affiliate' },
+		{ key: 'ads' },
+		{ key: 'algorithms' },
+		{ key: 'spoilers' },
+		{ key: 'guests' },
+		{ key: 'friends' }
 	];
 
 	// Every competitor cell is backed by a public source from Ønskeskyen/GoWish
@@ -151,8 +152,8 @@
 						<li
 							class="flex gap-3.5 p-5 border-primary-light/25 {i > 0 ? 'border-t-2' : ''} {i === 1 ? 'sm:border-t-0' : ''} {i % 2 === 1 ? 'sm:border-l-2' : ''}"
 						>
-							<span aria-hidden="true" class="shrink-0 w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-light/30 to-secondary/20 grid place-items-center text-xl">
-								{feature.icon}
+							<span aria-hidden="true" class="shrink-0 w-14 h-14 p-1.5 rounded-2xl bg-gradient-to-br from-primary-light/30 to-secondary/20">
+								<FeatureIcon name={feature.key} />
 							</span>
 							<div>
 								<h3 class="font-bold text-text">{$t(`landing.feature.${feature.key}.title`)}</h3>
